@@ -1,0 +1,22 @@
+Model: ODACITI -> confounded radii R_0 and R_t
+State: [M, pvessel, R0]
+n_ensembles = 100
+
+# True observation
+    pvessel = 60.0
+    M = cmro2_true / cmro2_by_M
+    Rves = 10.0
+    R0 = 80.0
+    Rt = 80.0
+
+cmro2_lower, cmro2_upper = 1.0, 3.0
+# Initial guess: Uniform for cmro2
+Lower bound CMRO2: cmro2_lower 
+Upper bound CMRO2: cmro2_upper
+# Pvessel, R0
+mean_p, mean_r0 = np.max(obs_perturbated), 70.0
+sigma_p, sigma_r0 = 2.0, 10.0
+
+Synthetic Data: KE
+LSQNonLin: KE
+Ensemble Kalman Filter: KE

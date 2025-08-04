@@ -1,0 +1,18 @@
+Model: FEM -> confounded radii R_0 and R_t
+State: [M]
+n_ensembles = 200
+
+# Initial guess: Uniform distribution for cmro2
+cmro2_lower, cmro2_upper = 1.0, 3.0
+
+# Covariance matrix
+M_var = cmro2_var / cmro2_by_M**2
+obs_var = 3.0**2 # measurement uncertainty
+Q = np.array([[M_var]])         # Background covariance matrix
+R = obs_var * np.eye(obs_dim)   # Observation covariance matrixservation covariance matrix
+
+obs_var_uncertain = 15.**2
+obs_var = 1.0**2 # measurement uncertainty
+
+tol_cov = 1e-1
+max_inner_iterations = 10

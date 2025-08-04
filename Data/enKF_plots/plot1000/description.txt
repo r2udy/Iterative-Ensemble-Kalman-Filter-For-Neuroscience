@@ -1,0 +1,12 @@
+Enkf stats:
+means -> cmro2
+cov -> cmro2 ** 2
+ensemble -> cmro2 + noise
+n_ensemble = 1000
+taking the entire annular shape for all the data
+data:
+(1, 2)
+(2, 3)
+(3, 2)
+(7, 2)
+(7, 3)

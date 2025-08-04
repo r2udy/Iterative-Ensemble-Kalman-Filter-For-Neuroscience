@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>
+<Xdmf Version="3.0" xmlns:xi="https://www.w3.org/2001/XInclude">
+  <Domain>
+    <Grid Name="disk" GridType="Uniform">
+      <Topology TopologyType="Triangle" NumberOfElements="7869" NodesPerElement="3">
+        <DataItem Dimensions="7869 3" NumberType="Int" Format="HDF">disk_mesh_0.h5:/Mesh/disk/topology</DataItem>
+      </Topology>
+      <Geometry GeometryType="XYZ">
+        <DataItem Dimensions="7049 3" Format="HDF">disk_mesh_0.h5:/Mesh/disk/geometry</DataItem>
+      </Geometry>
+    </Grid>
+    <Grid Name="disk_cells" GridType="Uniform">
+      <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@Name='disk']/Geometry)" />
+      <Topology TopologyType="Triangle" NumberOfElements="7869" NodesPerElement="3">
+        <DataItem Dimensions="7869 3" NumberType="Int" Format="HDF">disk_mesh_0.h5:/MeshTags/disk_cells/topology</DataItem>
+      </Topology>
+      <Attribute Name="disk_cells" AttributeType="Scalar" Center="Cell">
+        <DataItem Dimensions="7869 1" Format="HDF">disk_mesh_0.h5:/MeshTags/disk_cells/Values</DataItem>
+      </Attribute>
+    </Grid>
+    <Grid Name="disk_facets" GridType="Uniform">
+      <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@Name='disk']/Geometry)" />
+      <Topology TopologyType="PolyLine" NumberOfElements="6227" NodesPerElement="2">
+        <DataItem Dimensions="6227 2" NumberType="Int" Format="HDF">disk_mesh_0.h5:/MeshTags/disk_facets/topology</DataItem>
+      </Topology>
+      <Attribute Name="disk_facets" AttributeType="Scalar" Center="Cell">
+        <DataItem Dimensions="6227 1" Format="HDF">disk_mesh_0.h5:/MeshTags/disk_facets/Values</DataItem>
+      </Attribute>
+    </Grid>
+  </Domain>
+</Xdmf>
