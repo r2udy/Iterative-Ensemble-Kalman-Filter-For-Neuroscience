@@ -176,7 +176,7 @@ class EnKF:
         return obs_model
         
         
-    def predict(self, observation: np.ndarray):
+    def predict(self):
         """
         Predictions step: propagate each ensemble member through the dynamics model
         and add background noise. Here there is no dynamics model.
@@ -188,14 +188,8 @@ class EnKF:
             
             # Add background noise
             self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.Q)
-
-        # Add Measurment noise
-        noise = self.rng.multivariate_normal(np.zeros(self.obs_dim), self.nu * self.R)
-
-        self.observation = observation + noise
-
     
-    def update(self):
+    def update(self, observation: np.ndarray):
         
         """
         Update step: adjust the ensemble based on observations
@@ -213,7 +207,7 @@ class EnKF:
         
         # Generate perturbed observations
         for i in range(self.n_ensembles):
-            obs_ensemble[:, i] = self.observation + self.rng.multivariate_normal(
+            obs_ensemble[:, i] = observation + self.rng.multivariate_normal(
                 np.zeros(self.obs_dim), self.R
             )
         

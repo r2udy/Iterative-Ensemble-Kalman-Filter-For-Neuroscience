@@ -91,11 +91,12 @@ M_var = cmro2_var / cmro2_by_M**2 / 5
 M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
 obs_var_uncertain = 15.**2
 obs_var = 1.0**2 # measurement uncertainty
+sigma = 1.5
 
 n = 20 # data size
 pixel_size = 10
 
-tol_cov = 1e-2
+tol_cov = 1e-1
 max_inner_iterations = 10
 
 # --------------------------
@@ -142,8 +143,10 @@ cmro2_cov_est_enkf = []
 means = []
 covariances = []
 errors_enkf = []
-state_ensembles = [] #np.zeros((len(observations_id), n_ensembles))
-obs_covariances_matrices = []
+state_ensembles = []
+state_ensembles_overall = []
+stats_overall = []
+ensembles_trials = np.zeros((max_inner_iterations, n_ensembles))
 N_it = []
 
 # --------------------------
@@ -203,18 +206,22 @@ for i, entry in enumerate(uniform_dataset):
 
     R = matrix_diag
     enkf.set_observation_noise(R)
-    power_factor_it = 0
+    obs_perturbed = np.random.normal(obs, sigma)
+
+    counts = np.zeros(max_inner_iterations+2)
+    l_best = 0
+    cov_best = 10
 
     # Initialize stopping loop
-    for _ in range(max_inner_iterations):
+    for l in range(max_inner_iterations):
         # ----------------------
         # Save the previous stats properties to compare later
         prev_mean = enkf.get_state_estimate()[0] * cmro2_by_M
         prev_cov = enkf.get_state_estimate()[1] * (cmro2_by_M)**2
 
         # EnKF steps
-        enkf.predict(obs)
-        enkf.update()
+        enkf.predict()
+        enkf.update(obs)
 
         # Get current estimate
         mean, cov = enkf.get_state_estimate()
@@ -230,40 +237,32 @@ for i, entry in enumerate(uniform_dataset):
         # Early stop quantities
         mean_diff = np.abs(new_mean - prev_mean)
         cov_diff = np.abs(new_cov - prev_cov)
-
-        # Errors
-        generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                            pvessel=p_vessel, 
-                            Rves=Rves, 
-                            R0=R0, 
-                            Rt=R0)
-
-        # Compute the absolute error
-        error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+        print(f" ** Mean and Cov ** of the EnKF: \nmean: {cmro2_mean}\nstandard deviation: {np.sqrt(cmro2_cov)}\n")
         print(f"Absolute Mean and Cov Difference of the EnKF: \nmean: {mean_diff}\ncovariance: {cov_diff}")
+
+        state_ensembles_overall.append(enkf.ensemble.copy())
+        stats_overall.append((cmro2_mean, cmro2_cov))
 
         # Early stop criteria
         if mean_diff < np.sqrt(tol_cov)*2 and cov_diff < tol_cov:
-            # Save estimates, uncertainties and errors
             cmro2_est_enkf.append(cmro2_mean)
             cmro2_cov_est_enkf.append(cmro2_cov)
-            errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
             state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
             
-            print(f"Converged on data point, \narteriole:{art_id}\ndepth_id:{dth_id}")
-            break
-        else:
-            power_factor_it += 1
-            enkf.set_observation_noise(R)
+            # Errors
+            generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                                pvessel=p_vessel, 
+                                Rves=Rves, 
+                                R0=R0, 
+                                Rt=R0)
 
-    # If it didn't converge
-    cmro2_est_enkf.append(cmro2_mean)
-    cmro2_cov_est_enkf.append(cmro2_cov)
-    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
-    obs_covariances_matrices.append(power_factor_it)
-    print(f"Didn't converged on data point, \narteriole:{art_id}\ndepth_id:{dth_id}")
-    
+            # Compute the absolute error
+            error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+            errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
+            print(f"*** Converged on data point *** \narteriole:{art_id}\ndepth_id:{dth_id}")
+            N_it.append(l+1)
+            break
+
     # Print results in the terminal
     print(f"\n\n Ensemble Kalman Filter paramaters estimation")
     print("-"*65)
@@ -274,7 +273,7 @@ cmro2_est_enkf = np.array(cmro2_est_enkf)
 cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
 errors_enkf = np.array(errors_enkf)
 state_ensembles = np.array(state_ensembles)
-
+stats_overall = np.array(stats_overall)
 
 # ----------------------+ Plots the results +----------------------#
 # Simulated iteration steps
@@ -349,6 +348,24 @@ plt.ylabel('Estimated CMRO2 Uncertainty (umol /cm^3 /min)')
 plt.xlabel('Id DataPoint')
 plt.title('EnKF Uncertainty')
 plt.show()
+
+# -----------------------
+# Uncertainty associated to estimation
+# Create figure
+plt.figure(figsize=(10, 6))
+cmro2_mean_ = stats_overall[:, 0]
+cmro2_cov_ = stats_overall[:, 1]
+x = np.arange(cmro2_cov_.shape[0])
+# Plot mean +/- 1 standard deviation (sqrt of variance)
+plt.plot(x, cmro2_mean_, '-x', color='green', label='State EnKF estimate (CMRO2)')
+plt.fill_between(
+    x,
+    cmro2_mean_ - np.sqrt(cmro2_cov_),  # Lower bound (mean - σ)
+    cmro2_mean_ + np.sqrt(cmro2_cov_),  # Upper bound (mean + σ)
+    color='blue',
+    alpha=0.2,
+    label='Uncertainty (+/- 1 StD)'
+)
 
 # -----------------------
 # Posterior distribution through the iteration

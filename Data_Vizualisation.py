@@ -60,7 +60,7 @@ pixel_size = 10
 ####################
 
 # Select your the data
-art_id = 7
+art_id = 5
 dth_id = 2
 n = 20 # data size
 
@@ -281,7 +281,7 @@ grid_size = 20
 origin = (10, 10)
 
 # Angle ranges: from 0 to 90 degrees and from 270 to 360 degrees
-angle_ranges = [(110, 160), (265, 315)]
+angle_ranges = [(65, 70), (70, 185)]
 
 # Modify distance range to target from a given radius (e.g., 8 units) to the edge of the map
 min_radius = 4

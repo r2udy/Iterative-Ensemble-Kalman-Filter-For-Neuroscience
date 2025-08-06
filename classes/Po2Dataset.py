@@ -79,8 +79,8 @@ class Po2Dataset:
 if __name__ == "__main__":
     
     # create the dataset object
-    dataset = Po2Dataset(base_dir="C:/Users/ruudy/Desktop/Stanford_Biology/PROJECT_OxyDiff/TODEsource/dbase/", art_ids=np.array([3, 7, 8]))
+    dataset = Po2Dataset(base_dir="/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/TODEsource/dbase/", art_ids=np.arange(1, 12))
     # turn it into pandas dataframe
     df = pd.DataFrame(dataset.file_index)
     # Save it 
-    df.to_pickle("C:/Users/ruudy/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/dataset_uniform.pkl")
+    df.to_pickle("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/dataset.pkl")
