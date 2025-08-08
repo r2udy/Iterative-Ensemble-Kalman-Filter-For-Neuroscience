@@ -1,6 +1,6 @@
 Model: FEM -> confounded radii R_0 and R_t
 State: [M]
-n_ensembles = 200
+n_ensembles = 100, 200
 
 # Initial guess: Uniform distribution for cmro2
 cmro2_lower, cmro2_upper = 1.0, 3.0

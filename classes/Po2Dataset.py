@@ -5,7 +5,7 @@ Created on Fri May  2 14:15:55 2025
 @author: ruudy
 """
 
-
+import math
 import numpy as np
 import pandas as pd
 import scipy.io
@@ -14,6 +14,51 @@ import re
 from typing import List, Dict
 
 # --------- Load data ---------
+def load_data(filepath):
+    with open(filepath, 'r') as f:
+        # Read lines and remove empty lines
+        lines = [line.strip() for line in f if line.strip()]
+
+        # Process each line into tuples
+        data = [
+            tuple(tuple(map(int, filter(None, pair.strip('()').split(','))))
+            for pair in line.split('), ('))
+            for line in lines
+        ]
+    return data
+
+# ---------- Target Cells ----------- #
+def get_cells_by_angle(grid_size, origin, angle_ranges, distance_range=None):
+    x0, y0 = origin
+    selected_cells = []
+
+    for y in range(grid_size):
+        for x in range(grid_size):
+            dx = x - x0
+            dy = y0 - y  # reverse y if needed (grid coordinates)
+            
+            angle = math.degrees(math.atan2(dy, dx)) % 360
+            distance = math.hypot(dx, dy)
+
+            # Check angle ranges
+            in_angle = any(
+                start <= angle <= end if start <= end else angle >= start or angle <= end
+                for (start, end) in angle_ranges
+            )
+            
+            # Check distance range if given
+            in_distance = True
+            if distance_range:
+                min_d, max_d = distance_range
+                in_distance = min_d <= distance <= max_d
+
+            if in_angle and in_distance:
+                selected_cells.append((x, y))
+    
+    return selected_cells
+
+# --------- Dataset creation ---------
+
 class Po2Dataset:
     def __init__(self, base_dir: str, art_ids: List[int]):
         self.base_dir = base_dir

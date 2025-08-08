@@ -14,6 +14,7 @@ import os
 py_data_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/"
 py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/classes/"
 sys.path.append(os.path.abspath(py_file_location))
+
 import math
 import numpy as np
 import pandas as pd
@@ -24,6 +25,7 @@ from EnKF_FEM import EnKF
 from circlesearch import Po2Analyzer
 from MapGenerator import MapGenerator
 from lsqnonlin import Po2Fitter
+from Po2Dataset import load_data, get_cells_by_angle
 import pylab as P
 
 # --------- Load data --------- #
@@ -31,66 +33,20 @@ df = pd.read_pickle(py_data_location + "dataset.pkl")
 df_copy = df.copy()
 df_copy['pO2Value'] = df_copy['pO2Value'].apply(lambda x: x.flatten())
 df_copy.keys()
-
-def load_data(filepath):
-    with open(filepath, 'r') as f:
-        # Read lines and remove empty lines
-        lines = [line.strip() for line in f if line.strip()]
-
-        # Process each line into tuples
-        data = [
-            tuple(tuple(map(int, pair.strip('()').split(',')))
-            for pair in line.split('), ('))
-            for line in lines
-        ]
-    return data
-
 uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
-
-# ---------- Target Cells ----------- #
-def get_cells_by_angle(grid_size, origin, angle_ranges, distance_range=None):
-    x0, y0 = origin
-    selected_cells = []
-
-    for y in range(grid_size):
-        for x in range(grid_size):
-            dx = x - x0
-            dy = y0 - y  # reverse y if needed (grid coordinates)
-            
-            angle = math.degrees(math.atan2(dy, dx)) % 360
-            distance = math.hypot(dx, dy)
-
-            # Check angle ranges
-            in_angle = any(
-                start <= angle <= end if start <= end else angle >= start or angle <= end
-                for (start, end) in angle_ranges
-            )
-            
-            # Check distance range if given
-            in_distance = True
-            if distance_range:
-                min_d, max_d = distance_range
-                in_distance = min_d <= distance <= max_d
-
-            if in_angle and in_distance:
-                selected_cells.append((x, y))
-    
-    return selected_cells
-
 
 # --------------------------
 # Constants initial #
 D = 4.0e3
 alpha = 1.39e-15
-cmro2_low, cmro2_high = 1, 3 # umol/cm3/min
 cmro2_by_M = (60 * D * alpha * 1e12)
 
-cmro2_lower, cmro2_upper = 1.0, 3.0
+cmro2_lower, cmro2_upper = 1.0, 3.0     # umol/cm3/min
 cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
 M_var = cmro2_var / cmro2_by_M**2 / 5
-M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
-obs_var_uncertain = 15.**2
-obs_var = 1.0**2 # measurement uncertainty
+M_std = np.sqrt(cmro2_var) / cmro2_by_M     # model uncertainty
+obs_var_high = 15.**2
+obs_var_low = 1.0**2    # measurement uncertainty
 sigma = 1.5
 
 n = 20 # data size
@@ -110,10 +66,6 @@ n_ensembles = 100
 a = np.array([cmro2_lower / cmro2_by_M])
 b = np.array([cmro2_upper / cmro2_by_M])
 
-# Covariance Matrix
-Q = np.array([[M_var]])         # Background covariance matrix
-R = obs_var * np.eye(obs_dim)   # Observation covariance matrixservation covariance matrix
-
 # -------------------------
 # Create coordinate grids in physical units (microns)
 X, Y = np.meshgrid(np.arange(n), np.arange(n))
@@ -130,9 +82,9 @@ enkf = EnKF(state_dim, obs_dim, n_ensembles, dynamics_model, seed)
 # Initialize the EnKF method
 enkf.initialize_ensemble(a, b)
     
-# Update the the background and observation noise1
+# Update the background and noise
+Q = np.array([[M_var]])         # Background covariance matrix
 enkf.set_process_noise(Q)
-enkf.set_observation_noise(R)
 
 # Initialization of Arrays
 observations_id = [entry for entry in uniform_dataset]
@@ -158,6 +110,8 @@ for i, entry in enumerate(uniform_dataset):
 
     angles_1 = entry[1]
     angles_2 = entry[2]
+
+    min_radius = entry[3][0]
     
     # Observations
     obs = df_copy[(df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id)]['pO2Value'].tolist()[0]
@@ -173,12 +127,11 @@ for i, entry in enumerate(uniform_dataset):
     center = analyzer.center
 
 
-    # ----------------------
+    # ---------- Target Cells -----------
     # Adjust the observation covariance matrix to account very uncertain measurement
-    min_radius = 9
     max_radius = math.hypot(n, n)  # furthest possible distance in the grid
 
-    # Get updated selected cells
+    # Targeted cells (by angle + from min_radius to border)
     selected_cells_border = get_cells_by_angle(
         n,
         center,
@@ -186,27 +139,49 @@ for i, entry in enumerate(uniform_dataset):
         distance_range=(min_radius, max_radius)
     )
 
-    # Create a 400x400 matrix initialized to zeros
-    matrix_size = 400
-    matrix = np.zeros((matrix_size, matrix_size))
-
-    # Set higher values for targeted cells and lower for non-targeted ones
-    high_value = obs_var_uncertain
-    low_value = obs_var
-
-    # Create a 400x400 matrix for diagonals representing each cell of the 20x20 grid
-    matrix_diag = np.zeros((matrix_size, matrix_size))
-
-    # Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
+    # ---- Build diagonal R with per-cell variances ----
+    selected_set = set(selected_cells_border)
+    matrix_size = n * n  # 400 cells total
     grid_cells = [(x, y) for y in range(n) for x in range(n)]
 
-    # Assign higher or lower values to each diagonal cell based on whether it was targeted
+    # Start with your angle-based baseline
+    base_var = np.full(matrix_size, float(obs_var_low))
     for k, (x, y) in enumerate(grid_cells):
-        matrix_diag[k, k] = high_value if (x, y) in selected_cells_border else low_value
+        if (x, y) in selected_set:
+            base_var[k] = float(obs_var_high)  # temporary, will modulate below
 
-    R = matrix_diag
+    # ---- Linear distance modulation for targeted cells ----
+    cx, cy = center
+
+    idxs = []
+    dists = []
+    for k, (x, y) in enumerate(grid_cells):
+        if (x, y) in selected_set:
+            d = math.hypot(x - cx, y - cy)  # distance from center
+            dists.append(d)
+            idxs.append(k)
+
+    if idxs:
+        idxs = np.asarray(idxs)
+        dists = np.asarray(dists)
+
+        # Normalize distances from [min_radius, max_radius] → [0, 1]
+        d_norm = (dists - min_radius) / (max_radius - min_radius)
+        d_norm = np.clip(d_norm, 0.0, 1.0)
+
+        # Map linearly from low (obs_var_low) to high (obs_var_high)
+        per_cell_var = obs_var_low + (obs_var_high - obs_var_low) * d_norm
+
+        # Assign back into base_var
+        base_var[idxs] = per_cell_var
+
+    # ---- Build diagonal of the Observation covariance matrix ----
+    R = np.diag(base_var.astype(float))
     enkf.set_observation_noise(R)
-    obs_perturbed = np.random.normal(obs, sigma)
+
+    print("Non-targeted example variance:", base_var[0])  # should be ~obs_var_low if not targeted
+    print("Min/Max targeted variance:", base_var[idxs].min(), base_var[idxs].max())
+    plt.imshow(base_var.reshape(n, n), origin='upper'); plt.colorbar(); plt.title('Per-cell variance'); plt.show()
 
     counts = np.zeros(max_inner_iterations+2)
     l_best = 0
@@ -268,7 +243,7 @@ for i, entry in enumerate(uniform_dataset):
     print("-"*65)
     print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
     
-
+# Convert lists to numpy arrays for further processing
 cmro2_est_enkf = np.array(cmro2_est_enkf)
 cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
 errors_enkf = np.array(errors_enkf)
@@ -395,3 +370,9 @@ fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
 
 # Show the plot
 plt.show()
+
+# Save the data
+path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/EnKF_real_data_iterative"
+np.save(path + f"state_ensembles_{n_ensembles}.npy", state_ensembles)
+np.save(path + f"cmro2_means_{n_ensembles}.npy", cmro2_mean_)
+np.save(path + f"cmro2_covs_{n_ensembles}.npy", cmro2_cov_)

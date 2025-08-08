@@ -12,30 +12,19 @@ py_data_location = os.path.join(os.getcwd(), "Data")
 py_file_location = os.path.join(os.getcwd(), "classes")
 sys.path.append(py_file_location)
 
+import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from circlesearch import Po2Analyzer
 from scipy.ndimage import gaussian_filter
+from Po2Dataset import load_data
 
 # --------- Load data --------- #
 df = pd.read_pickle(py_data_location + "/dataset.pkl")
 df_copy = df.copy()
 df_copy['pO2Value'] = df_copy['pO2Value'].apply(lambda x: x.flatten())
 df_copy.keys()
-
-def load_data(filepath):
-    with open(filepath, 'r') as f:
-        # Read lines and remove empty lines
-        lines = [line.strip() for line in f if line.strip()]
-
-        # Process each line into tuples
-        data = [
-            tuple(tuple(map(int, pair.strip('()').split(',')))
-            for pair in line.split('), ('))
-            for line in lines
-        ]
-    return data
 
 uniform_dataset = load_data(py_data_location + '/uniform_dataset.txt')
 # Create a set of all (art_id, dth_id) pairs for O(1) lookups
@@ -60,8 +49,7 @@ pixel_size = 10
 ####################
 
 # Select your the data
-art_id = 5
-dth_id = 2
+art_id, dth_id = (5, 2)
 n = 20 # data size
 
 # Load the map
@@ -79,175 +67,14 @@ cmro2_by_M = (60 * D * alpha * 1e12)
 M = cmro2_true / cmro2_by_M
 pixel_size = 10.0
 
-# # Find circles
-# analyzer = Po2Analyzer(pO2_value, M, r0=60.0)
-# analyzer.find_circles()
-# analytic_map = analyzer.compute_analytical_maps()[0]
-# analytic_map_perturbated = np.random.normal(analytic_map.flatten(), scale=1.0)
-# analytic_map_perturbated = analytic_map_perturbated.reshape(grid_shape, order='F')
-
-# r_in = analyzer.rin
-# r_out = analyzer.rout
-# center = analyzer.center
-# mask_outer = analyzer.mask_outer
-# mask_inner = analyzer.mask_inner
-# mask_angle = analyzer.mask_angle
-# circumference_out = analyzer.circumference_out
-
-# print(f'The ratio M is: {M * 1e3} * 1e-3')
-# print(f'r_in is: {r_in}')
-# print(f'r_out is: {r_out}')
-
-# # --------- Plot Original + Circles ---------
-# theta = np.linspace(0, 2 * np.pi, 100) # angles
-# rin = r_in / pixel_size
-# rout = r_out / pixel_size
-# # Outer circle
-# circle_outer_x = rout * np.cos(theta) + center[0]
-# circle_outer_y = rout * np.sin(theta) + center[1]
-# # Inner circle
-# circle_inner_x = rin * np.cos(theta) + center[0]
-# circle_inner_y = rin * np.sin(theta) + center[1]
-
 plt.pcolor(pO2_value, cmap='jet', shading='auto')
-# plt.plot(circle_outer_x, circle_outer_y, '--', linewidth=2, color='cyan', label=f'Outer | radius = {r_out} μm')
-# plt.plot(circle_inner_x, circle_inner_y, '-', linewidth=2, color='magenta', label=f'Inner | radius = {r_in} μm ')
-# plt.plot(center[0], center[1], 'x', color='black', label='Center')
 plt.axis('equal')
 plt.colorbar()
 plt.title("Inner and Outer radius search")
 plt.legend()
 plt.show()
 
-# ###################################################################################################
-
-# # 3D Vizualition of the Laplacian of the Analytical solution Vs. the measurement
-# x = np.linspace(-10, 10, 20) * pixel_size
-# y = np.linspace(-10, 10, 20) * pixel_size
-
-# # Create meshgrid 3D plot
-# X, Y = np.meshgrid(x, y)
-
-# # Michaelis-Menten Enzyme kinetics
-# """
-# Modeling oxygen or glucose consumption in tissue
-# """
-# def cmro2(p, M0, p50): 
-#     return M0 * p / (p50 + p) * cmro2_by_M
-
-
-# # True observation
-# pvessel = 60.0
-# cmro2_true = 2.0
-# M0 = cmro2_true / cmro2_by_M
-# Rves = 10.0
-# R0 = 80.0
-# Rt = 80.0
-
-# # Generate the 1D / 2D Map
-# generator = MapGenerator(
-#     cmro2=cmro2_true,
-#     pvessel=pvessel,
-#     Rves=Rves,
-#     R0=R0,
-#     Rt=Rt,
-# )
-
-# # Set my arrays
-# r_data = np.linspace(10., 100, 200)
-# p_data = generator._partial_pressure(r_data)
-# r_values = generator.r_values
-
-# # Define the coefficient p50
-# tolerance = 0.02
-# idx = np.where((p_data >= pvessel/2 - tolerance) & (p_data <= pvessel/2 + tolerance))
-# p50 = p_data[idx[0][0]]
-
-# x = r_data
-# y = cmro2(p_data, M0, p50) 
-# plt.figure(figsize=(10, 6))
-# plt.plot(x, y)
-# plt.xlabel('Radius (um)')
-# plt.ylabel('CMRO2 (umol /cm^3 /min)')
-# plt.show()
-
 # --------------------------------
-
-
-# # Data
-# array = analytic_map
-
-# from scipy.ndimage import convolve
-
-# def cylindrical_laplacian_2d(f, dr, r_values):
-
-#   """
-#   Compute the cylindrical Laplacian of a 2D axisymmetric array.
-
-#   Args:
-#       f: 2D numpy array (axisymmetric, so ∂f/∂θ = 0)
-#       dr: Radial step size
-#       r_values: 2D array of radial distances from center
-
-#   Returns:
-#       2D array of Laplacian values
-#   """
-#   # Avoid division by zero at r=0
-#   r_values = np.where(r_values == 0, 1e-10, r_values)
-
-#   # First derivative using central differences
-#   df_dr = np.gradient(f, dr, axis=0)
-
-#   # Multiply by r
-#   r_df_dr = r_values * df_dr
-
-#   # Second derivative using central differences
-#   d2f_dr2 = np.gradient(r_df_dr, dr, axis=0)
-
-#   # Final Laplacian
-#   laplacian = d2f_dr2 / r_values
-
-#   return laplacian
-
-# rows, cols = 20, 20
-# dr = 10.0 # radial step size
-
-# # Create radial coordinate grid
-# X, Y = np.meshgrid(np.arange(cols), np.arange(rows))
-
-# # Center the outer circle in the middle of the pixel cells
-# dx = (X - (2*center[0] - 1) / 2) * dr
-# dy = (Y - (2*center[1] - 1) / 2) * dr
-# r = np.sqrt(dx**2 + dy**2)
-# f = generator.pO2_array
-# laplacian_ = - cylindrical_laplacian_2d(f, dr, r) * cmro2_by_M
-
-# laplacian = np.where(r<20., np.nan, laplacian_)
-
-# # Quantity(ies) of interest
-# Z = laplacian * cmro2_by_M
-
-# Z_tild = 1.44 * np.ones((20, 20))
-# Z_plot = np.where(Z > Z_tild, np.nan, Z_tild)
-
-# Z_modes = 5.0 * np.sin(2*np.pi*X / 200) * np.sin(2*np.pi*Y / 200)
-
-# fig = plt.figure(figsize=(10, 6))
-# ax = fig.add_subplot(111, projection='3d')
-# surf = ax.plot_surface(X, Y, Z, cmap='viridis')
-# surf2 = ax.plot_surface(X, Y, Z_plot, cmap='jet', edgecolor='none', alpha=0.3)
-# ax.view_init(elev=30, azim=-45) # Change the viewing angle
-# ax.set_ylabel('Y')
-# ax.set_xlabel('X')
-# ax.set_zlabel('Lplacian')
-# ax.set_title('3D PDF Surface of Laplacian of the partial Pressure')
-# fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
-# plt.tight_layout()
-# plt.show()
-
-# --------------------------------
-import math
-
 def get_cells_by_angle(grid_size, origin, angle_ranges, distance_range=None):
     x0, y0 = origin
     selected_cells = []
@@ -281,10 +108,10 @@ grid_size = 20
 origin = (10, 10)
 
 # Angle ranges: from 0 to 90 degrees and from 270 to 360 degrees
-angle_ranges = [(65, 70), (70, 185)]
+angle_ranges = [(75, 80), (80, 180)]
 
 # Modify distance range to target from a given radius (e.g., 8 units) to the edge of the map
-min_radius = 4
+min_radius = 5
 max_radius = math.hypot(grid_size, grid_size)  # furthest possible distance in the grid
 
 # Get updated selected cells
