@@ -39,14 +39,15 @@ uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 # Constants initial #
 D = 4.0e3
 alpha = 1.39e-15
+cmro2_low, cmro2_high = 1, 3 # umol/cm3/min
 cmro2_by_M = (60 * D * alpha * 1e12)
 
-cmro2_lower, cmro2_upper = 1.0, 3.0     # umol/cm3/min
+cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
 M_var = cmro2_var / cmro2_by_M**2 / 5
-M_std = np.sqrt(cmro2_var) / cmro2_by_M     # model uncertainty
+M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
 obs_var_high = 15.**2
-obs_var_low = 1.0**2    # measurement uncertainty
+obs_var_low = 1.0**2 # measurement uncertainty
 sigma = 1.5
 
 n = 20 # data size
@@ -82,7 +83,7 @@ enkf = EnKF(state_dim, obs_dim, n_ensembles, dynamics_model, seed)
 # Initialize the EnKF method
 enkf.initialize_ensemble(a, b)
     
-# Update the background and noise
+# Update the the background noise
 Q = np.array([[M_var]])         # Background covariance matrix
 enkf.set_process_noise(Q)
 
@@ -140,59 +141,36 @@ for i, entry in enumerate(uniform_dataset):
     )
 
     # ---- Build diagonal R with per-cell variances ----
-    selected_set = set(selected_cells_border)
-    matrix_size = n * n  # 400 cells total
+    matrix_size = n * n
+    matrix      = np.zeros((matrix_size, matrix_size))
+
+    # Set higher values for targeted cells and lower for non-targeted ones
+    high_value  = obs_var_high
+    low_value   = obs_var_low
+
+    # Create a 400x400 matrix for diagonals representing each cell of the 20x20 grid
+    matrix_diag = np.zeros((matrix_size, matrix_size))
+
+    # Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
     grid_cells = [(x, y) for y in range(n) for x in range(n)]
 
-    # Start with your angle-based baseline
-    base_var = np.full(matrix_size, float(obs_var_low))
+    # Assign higher or lower values to each diagonal cell based on whether it was targeted
     for k, (x, y) in enumerate(grid_cells):
-        if (x, y) in selected_set:
-            base_var[k] = float(obs_var_high)  # temporary, will modulate below
+        matrix_diag[k, k] = high_value if (x, y) in selected_cells_border else low_value
 
-    # ---- Linear distance modulation for targeted cells ----
-    cx, cy = center
-
-    idxs = []
-    dists = []
-    for k, (x, y) in enumerate(grid_cells):
-        if (x, y) in selected_set:
-            d = math.hypot(x - cx, y - cy)  # distance from center
-            dists.append(d)
-            idxs.append(k)
-
-    if idxs:
-        idxs = np.asarray(idxs)
-        dists = np.asarray(dists)
-
-        # Normalize distances from [min_radius, max_radius] → [0, 1]
-        d_norm = (dists - min_radius) / (max_radius - min_radius)
-        d_norm = np.clip(d_norm, 0.0, 1.0)
-
-        # Map linearly from low (obs_var_low) to high (obs_var_high)
-        per_cell_var = obs_var_low + (obs_var_high - obs_var_low) * d_norm
-
-        # Assign back into base_var
-        base_var[idxs] = per_cell_var
-
-    # ---- Build diagonal of the Observation covariance matrix ----
-    R = np.diag(base_var.astype(float))
+    R = matrix_diag
     enkf.set_observation_noise(R)
 
-    print("Non-targeted example variance:", base_var[0])  # should be ~obs_var_low if not targeted
-    print("Min/Max targeted variance:", base_var[idxs].min(), base_var[idxs].max())
-    plt.imshow(base_var.reshape(n, n), origin='upper'); plt.colorbar(); plt.title('Per-cell variance'); plt.show()
-
-    counts = np.zeros(max_inner_iterations+2)
-    l_best = 0
-    cov_best = 10
+    counts      = np.zeros(max_inner_iterations+2)
+    l_best      = 0
+    cov_best    = 10
 
     # Initialize stopping loop
     for l in range(max_inner_iterations):
         # ----------------------
         # Save the previous stats properties to compare later
-        prev_mean = enkf.get_state_estimate()[0] * cmro2_by_M
-        prev_cov = enkf.get_state_estimate()[1] * (cmro2_by_M)**2
+        prev_mean   = enkf.get_state_estimate()[0] * cmro2_by_M
+        prev_cov    = enkf.get_state_estimate()[1] * (cmro2_by_M)**2
 
         # EnKF steps
         enkf.predict()
@@ -203,15 +181,15 @@ for i, entry in enumerate(uniform_dataset):
 
         # Means and Covariances
         cmro2_mean  = mean[0] * cmro2_by_M
-        cmro2_cov = cov * (cmro2_by_M)**2
+        cmro2_cov   = cov * (cmro2_by_M)**2
 
         # Save the the updated stats propreties to compare
-        new_mean = cmro2_mean
-        new_cov = cmro2_cov
+        new_mean    = cmro2_mean
+        new_cov     = cmro2_cov
 
         # Early stop quantities
-        mean_diff = np.abs(new_mean - prev_mean)
-        cov_diff = np.abs(new_cov - prev_cov)
+        mean_diff   = np.abs(new_mean - prev_mean)
+        cov_diff    = np.abs(new_cov - prev_cov)
         print(f" ** Mean and Cov ** of the EnKF: \nmean: {cmro2_mean}\nstandard deviation: {np.sqrt(cmro2_cov)}\n")
         print(f"Absolute Mean and Cov Difference of the EnKF: \nmean: {mean_diff}\ncovariance: {cov_diff}")
 
@@ -243,7 +221,7 @@ for i, entry in enumerate(uniform_dataset):
     print("-"*65)
     print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
     
-# Convert lists to numpy arrays for further processing
+
 cmro2_est_enkf = np.array(cmro2_est_enkf)
 cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
 errors_enkf = np.array(errors_enkf)
