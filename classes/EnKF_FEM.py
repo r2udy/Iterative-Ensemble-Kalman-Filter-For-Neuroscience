@@ -82,11 +82,11 @@ class EnKF:
 
     def set_process_noise(self, Q: np.ndarray):
         """Set the background noise covariance matrix"""
-        self.Q = Q
+        self.Q = np.sqrt(Q)
     
     def set_observation_noise(self, R: np.ndarray):
         """Set the observation noise covariance matrix"""
-        self.R = R
+        self.R = np.sqrt(R)
 
     def observation_operator(self, observation: np.ndarray, state: np.ndarray):
         """

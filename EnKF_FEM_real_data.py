@@ -54,7 +54,12 @@ n = 20 # data size
 pixel_size = 10
 
 tol_cov = 1e-1
-max_inner_iterations = 10
+max_inner_iterations = 2
+
+# Create coordinate grids in physical units (microns)
+X, Y = np.meshgrid(np.arange(n), np.arange(n))
+X = X * pixel_size
+Y = Y * pixel_size
 
 # --------------------------
 # EnKF Parameters
@@ -67,16 +72,11 @@ n_ensembles = 100
 a = np.array([cmro2_lower / cmro2_by_M])
 b = np.array([cmro2_upper / cmro2_by_M])
 
-# -------------------------
-# Create coordinate grids in physical units (microns)
-X, Y = np.meshgrid(np.arange(n), np.arange(n))
-X = X * pixel_size
-Y = Y * pixel_size
-
 # No dynamic model
 def dynamics_model(x):
     return x
 
+# -------------------------
 # Create the EnKF object
 enkf = EnKF(state_dim, obs_dim, n_ensembles, dynamics_model, seed)
 
@@ -87,6 +87,7 @@ enkf.initialize_ensemble(a, b)
 Q = np.array([[M_var]])         # Background covariance matrix
 enkf.set_process_noise(Q)
 
+# -------------------------
 # Initialization of Arrays
 observations_id = [entry for entry in uniform_dataset]
 observations = []
@@ -161,65 +162,39 @@ for i, entry in enumerate(uniform_dataset):
     R = matrix_diag
     enkf.set_observation_noise(R)
 
-    counts      = np.zeros(max_inner_iterations+2)
-    l_best      = 0
-    cov_best    = 10
+    # ----------------------
+    # EnKF steps
+    enkf.predict()
+    enkf.update(obs)
 
-    # Initialize stopping loop
-    for l in range(max_inner_iterations):
-        # ----------------------
-        # Save the previous stats properties to compare later
-        prev_mean   = enkf.get_state_estimate()[0] * cmro2_by_M
-        prev_cov    = enkf.get_state_estimate()[1] * (cmro2_by_M)**2
+    # Get current estimate
+    mean, cov = enkf.get_state_estimate()
 
-        # EnKF steps
-        enkf.predict()
-        enkf.update(obs)
+    # Means and Covariances
+    cmro2_mean  = mean[0] * cmro2_by_M
+    cmro2_cov   = cov * (cmro2_by_M)**2
 
-        # Get current estimate
-        mean, cov = enkf.get_state_estimate()
+    print(f" ** Mean and Cov ** of the EnKF: \nmean: {cmro2_mean}\nstandard deviation: {np.sqrt(cmro2_cov)}\n")
 
-        # Means and Covariances
-        cmro2_mean  = mean[0] * cmro2_by_M
-        cmro2_cov   = cov * (cmro2_by_M)**2
+    cmro2_est_enkf.append(cmro2_mean)
+    cmro2_cov_est_enkf.append(cmro2_cov)
+    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
 
-        # Save the the updated stats propreties to compare
-        new_mean    = cmro2_mean
-        new_cov     = cmro2_cov
+    # Errors
+    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                        pvessel=p_vessel, 
+                        Rves=Rves, 
+                        R0=R0, 
+                        Rt=R0)
 
-        # Early stop quantities
-        mean_diff   = np.abs(new_mean - prev_mean)
-        cov_diff    = np.abs(new_cov - prev_cov)
-        print(f" ** Mean and Cov ** of the EnKF: \nmean: {cmro2_mean}\nstandard deviation: {np.sqrt(cmro2_cov)}\n")
-        print(f"Absolute Mean and Cov Difference of the EnKF: \nmean: {mean_diff}\ncovariance: {cov_diff}")
-
-        state_ensembles_overall.append(enkf.ensemble.copy())
-        stats_overall.append((cmro2_mean, cmro2_cov))
-
-        # Early stop criteria
-        if mean_diff < np.sqrt(tol_cov)*2 and cov_diff < tol_cov:
-            cmro2_est_enkf.append(cmro2_mean)
-            cmro2_cov_est_enkf.append(cmro2_cov)
-            state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
-            
-            # Errors
-            generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                                pvessel=p_vessel, 
-                                Rves=Rves, 
-                                R0=R0, 
-                                Rt=R0)
-
-            # Compute the absolute error
-            error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
-            errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-            print(f"*** Converged on data point *** \narteriole:{art_id}\ndepth_id:{dth_id}")
-            N_it.append(l+1)
-            break
+    # Compute the absolute error
+    error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
 
     # Print results in the terminal
     print(f"\n\n Ensemble Kalman Filter paramaters estimation")
     print("-"*65)
-    print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
+    print(f"\nCMRO2 Mean: {cmro2_mean}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}, Rves: {Rves}, R0: {R0}\n")
     
 
 cmro2_est_enkf = np.array(cmro2_est_enkf)
@@ -228,7 +203,9 @@ errors_enkf = np.array(errors_enkf)
 state_ensembles = np.array(state_ensembles)
 stats_overall = np.array(stats_overall)
 
+
 # ----------------------+ Plots the results +----------------------#
+
 # Simulated iteration steps
 x_obs = np.arange(1, len(observations_id) + 1)
 
@@ -256,7 +233,6 @@ P.ylabel('State value CMRO2 (umol /cm^3 /min)')
 P.title('EnKF State Estimation with Uncertainty')
 P.grid(True)
 P.show()
-
 
 data = np.mean(data, axis=0)
 P.figure()
@@ -295,7 +271,7 @@ P.show()
 data = state_ensembles * cmro2_by_M
 fig, ax = plt.subplots(figsize=(10, 6))
 cov_track = np.array([np.std(array) for array in data])
-ax.plot(cov_track)
+ax.plot(cov_track, marker='o')
 # Labels and title
 plt.ylabel('Estimated CMRO2 Uncertainty (umol /cm^3 /min)')
 plt.xlabel('Id DataPoint')
@@ -349,8 +325,8 @@ fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
 # Show the plot
 plt.show()
 
-# Save the data
-path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/EnKF_real_data_iterative"
-np.save(path + f"state_ensembles_{n_ensembles}.npy", state_ensembles)
-np.save(path + f"cmro2_means_{n_ensembles}.npy", cmro2_mean_)
-np.save(path + f"cmro2_covs_{n_ensembles}.npy", cmro2_cov_)
+# # Save the data
+# path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/EnKF_real_data_iterative/"
+# np.save(path + f"state_ensembles_{n_ensembles}.npy", state_ensembles)
+# np.save(path + f"cmro2_means_{n_ensembles}.npy", cmro2_mean_)
+# np.save(path + f"cmro2_covs_{n_ensembles}.npy", cmro2_cov_)
