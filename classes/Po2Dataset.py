@@ -16,13 +16,21 @@ from typing import List, Dict
 # --------- Load data ---------
 def load_data(filepath):
     with open(filepath, 'r') as f:
-        # Read lines and remove empty lines
-        lines = [line.strip() for line in f if line.strip()]
+        # Read lines, remove comments, and skip empty lines
+        lines = [
+            line.split('#', 1)[0].strip()  # take text before '#' and strip spaces
+            for line in f
+            if line.strip() and not line.strip().startswith('#')
+        ]
+        # Remove lines that became empty after stripping comments
+        lines = [line for line in lines if line]
 
         # Process each line into tuples
         data = [
-            tuple(tuple(map(int, filter(None, pair.strip('()').split(','))))
-            for pair in line.split('), ('))
+            tuple(
+                tuple(map(int, filter(None, pair.strip('()').split(','))))
+                for pair in line.split('), (')
+            )
             for line in lines
         ]
     return data

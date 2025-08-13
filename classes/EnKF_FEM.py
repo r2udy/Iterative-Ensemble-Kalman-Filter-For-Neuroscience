@@ -61,7 +61,9 @@ class EnKF:
         
         # Covariance matrices
         self.Q = np.eye(state_dim) # Background noise covariance
-        self.R = np.eye(obs_dim) # Observation noise covariancemu
+        self.R = np.eye(obs_dim) # Observation noise covariance
+
+        self.length_scale = 1.0 # Length scale for the update step
         
         
     def initialize_ensemble(self, a: np.ndarray, b: np.ndarray):
@@ -172,7 +174,7 @@ class EnKF:
 
         # Evaluate FEM solution at observation points
         obs_model = griddata((x, y), uh, points, method='linear') # Interpolate z values at the grid points
-        
+
         return obs_model
         
         
@@ -233,8 +235,8 @@ class EnKF:
         self.K = A_BHT @ np.linalg.inv(A_HBHT + self.R)
         
         # 3. Update ensemble: innovation = observation - obs_model(ensemble)
-        innovation = obs_ensemble - obs_model_ensembles
-        self.ensemble += self.K @ innovation
+        self.innovation = obs_ensemble - obs_model_ensembles
+        self.ensemble += self.length_scale * self.K @ self.innovation
         
     def get_state_estimate(self):
         """
@@ -272,3 +274,14 @@ class EnKF:
             The ensemble members
         """
         return self.K
+    
+    def get_innovation(self):
+        """
+        Get the current innovation
+        
+        Returns:
+        --------
+        innovation : np.ndarray, shape (obs_dim, n_ensembles)
+            The innovation for each ensemble member
+        """
+        return self.innovation
