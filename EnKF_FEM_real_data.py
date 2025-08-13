@@ -53,8 +53,8 @@ beta = 1/50
 n = 20 # data size
 pixel_size = 10
 
-tol_cov = 1e-1
-max_inner_iterations = 2
+tol_correction = .5
+max_inner_iterations = 8
 
 # Create coordinate grids in physical units (microns)
 X, Y = np.meshgrid(np.arange(n), np.arange(n))
@@ -100,6 +100,7 @@ errors_enkf = []
 state_ensembles = []
 state_ensembles_overall = []
 stats_overall = []
+corrections_overall = []
 ensembles_trials = np.zeros((max_inner_iterations, n_ensembles))
 N_it = []
 corrections = []
@@ -165,104 +166,74 @@ for i, entry in enumerate(uniform_dataset):
     R = matrix_diag
     enkf.set_observation_noise(R)
 
-    # ----------------------
-<<<<<<< HEAD
-=======
-    # Data scaling
-    obs_perturbated = obs + np.random.multivariate_normal(np.zeros(obs_dim), beta * R)  # Add noise to the observation
-    obs_perturbated = obs_perturbated  # Normalize to zero
-    
-    # ----------------------
->>>>>>> 876241a (Better plot but bad performances. The code allow length scale tuning. load data handle comment in txt file)
-    # EnKF steps
-    enkf.predict()
-    enkf.update(obs)
+    for inner_iter in range(max_inner_iterations):
+        print(f"\n\nIteration {inner_iter + 1} of {max_inner_iterations} for observation (arteriole {art_id}, depth {dth_id})")
 
-    # Get current estimate
-    mean, cov = enkf.get_state_estimate()
+        # ----------------------
+        # EnKF steps
+        enkf.predict()
+        enkf.update(obs)
 
-    # Means and Covariances
-    cmro2_mean  = mean[0] * cmro2_by_M
-    cmro2_cov   = cov * (cmro2_by_M)**2
+        # Get current estimate
+        mean, cov = enkf.get_state_estimate()
 
-<<<<<<< HEAD
-    print(f" ** Mean and Cov ** of the EnKF: \nmean: {cmro2_mean}\nstandard deviation: {np.sqrt(cmro2_cov)}\n")
+        # Means and Covariances
+        cmro2_mean  = mean[0] * cmro2_by_M
+        cmro2_cov   = cov * (cmro2_by_M)**2
+        correction = np.abs(np.mean(enkf.K @ enkf.innovation) * cmro2_by_M)
 
-    cmro2_est_enkf.append(cmro2_mean)
-    cmro2_cov_est_enkf.append(cmro2_cov)
-    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
+        # Compute the absolute error
+        generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                            pvessel=p_vessel, 
+                            Rves=Rves, 
+                            R0=R0, 
+                            Rt=R0)
+        error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
 
-    # Errors
-    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                        pvessel=p_vessel, 
-                        Rves=Rves, 
-                        R0=R0, 
-                        Rt=R0)
+        # Print the results
+        print(f"Correction: {correction}")
+        print(f"Mean Absolute Error: {error_enkf.mean()}")    
 
-    # Compute the absolute error
-    error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
-    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-=======
-    # Results tracking
-    state_ensembles_overall.append(enkf.ensemble.copy())
-    stats_overall.append((cmro2_mean, cmro2_cov))
-    corrections.append(np.abs(np.mean(enkf.K @ enkf.innovation) * cmro2_by_M)) # Save the correction term
-    print(f"Correction: {np.mean(enkf.K @ enkf.innovation) * cmro2_by_M}")
-    
-    # Errors
-    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                        pvessel=p_vessel, 
-                        Rves=Rves, 
-                        R0=R0, 
-                        Rt=R0)
+        # Results tracking
+        state_ensembles_overall.append(enkf.ensemble.copy())
+        stats_overall.append((cmro2_mean, cmro2_cov))
+        corrections_overall.append(correction) # Save the correction term
 
-    # Compute the absolute error
-    error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+        if correction < tol_correction or inner_iter == max_inner_iterations - 1:
+            # If the convergence criteria is met, save the results
+            cmro2_est_enkf.append(cmro2_mean)
+            cmro2_cov_est_enkf.append(cmro2_cov)
+            state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
+            errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
+            corrections.append(correction) # Save the correction term
+            N_it.append(inner_iter + 1) # Save the number of iterations for this observation
+            break
 
-    # If the convergence criteria is met, save the results
-    cmro2_est_enkf.append(cmro2_mean)
-    cmro2_cov_est_enkf.append(cmro2_cov)
-    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
-    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-
-    # Update the length scale for the next iteration
-    enkf.length_scale = 1. # Reset length scale for the next iteration
-    print(f"Length scale updated to: {enkf.length_scale}")
->>>>>>> 876241a (Better plot but bad performances. The code allow length scale tuning. load data handle comment in txt file)
-
-    # Print results in the terminal
-    print(f"\n\n Ensemble Kalman Filter paramaters estimation")
-    print("-"*65)
-<<<<<<< HEAD
-    print(f"\nCMRO2 Mean: {cmro2_mean}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}, Rves: {Rves}, R0: {R0}\n")
-    
-=======
-    print(f"Observation ID: {art_id}, Depth ID: {dth_id}")
-    print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
-    print(f"Mean Absolute Error: {error_enkf.mean()}")
->>>>>>> 876241a (Better plot but bad performances. The code allow length scale tuning. load data handle comment in txt file)
+        # Print results in the terminal
+        print(f"\n\n Ensemble Kalman Filter paramaters estimation")
+        print("-"*65)
+        print(f"Observation ID: {art_id}, Depth ID: {dth_id}")
+        print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
+        print(f"Mean Absolute Error: {error_enkf.mean()}")
+        print(f"Correction: {correction}")
 
 cmro2_est_enkf = np.array(cmro2_est_enkf)
 cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
 errors_enkf = np.array(errors_enkf)
 state_ensembles = np.array(state_ensembles)
 stats_overall = np.array(stats_overall)
+corrections_overall = np.array(corrections_overall)
+state_ensembles_overall = np.array(state_ensembles_overall)
 
 
-<<<<<<< HEAD
-=======
 # ------------------------------------------------------------------
->>>>>>> 876241a (Better plot but bad performances. The code allow length scale tuning. load data handle comment in txt file)
 # ----------------------+ Plots the results +----------------------#
 
 # Simulated iteration steps
 x_obs = np.arange(1, len(observations_id) + 1)
 
-# Stats
-overall_mean = cmro2_est_enkf.mean()
-
 # -----------------------
-# Ratio M Stats
+# CMRO_2 Stats for converged iterations
 state_ensembles = np.squeeze(state_ensembles, 1) # remove a dimension
 # Apply cmro2_by_M across the last dimension (broadcasting)
 data = state_ensembles.T * cmro2_by_M # shape: (n_ensembles, n_iterations)
@@ -284,10 +255,33 @@ P.grid(True)
 P.show()
 # P.savefig('enkf_state_estimation_test.png', dpi=300, bbox_inches='tight')
 
-data = np.mean(data, axis=0)
+
+# -----------------------
+# CMRO_2 Stats for overall iterations
+# Apply cmro2_by_M across the last dimension (broadcasting)
+state_ensembles_overall = np.squeeze(state_ensembles_overall, 1) # remove a dimension
+data = state_ensembles_overall.T * cmro2_by_M # shape: (n_ensembles, n_iterations)
+numBoxes = data.shape[1]  # now robust
+x_obs = np.arange(1, numBoxes + 1)
+names = [f'obs{i}' for i in range(1, numBoxes + 1)]
+P.figure()
+bp = P.boxplot(data, labels=names)
+
+for i in range(numBoxes):
+    y = data[:, i]
+    x = np.random.normal(1+i, 0.04, size=len(y))
+    P.plot(x, y, 'r.', alpha=0.2)
+P.xlabel('$PO_{2}$ Map ID')
+P.ylabel('State value CMRO2 (umol /cm^3 /min)')
+P.title('EnKF State Estimation with Uncertainty')
+P.grid(True)
+P.show()
+
+# -----------------------
+# CMRO_2 Stats for overall for converged iterations
+data = np.mean(state_ensembles.T * cmro2_by_M, axis=0)
 P.figure()
 bp = P.boxplot(data, labels=['Overall Stats'])
-
 y = data
 x = np.random.normal(1, 0.04, size=len(y))
 P.plot(x, y, 'r.', alpha=0.2)
@@ -303,11 +297,10 @@ P.show()
 # Absolute Error Stats
 # Stats
 data = errors_enkf.T # Define data
-
+numBoxes = data.shape[1]  # now robust
+names = [f'obs{i}' for i in range(1, numBoxes + 1)]
 P.figure()
-
 bp = P.boxplot(data, labels=names)
-
 for i in range(numBoxes):
     y = data[:, i]
     x = np.random.normal(1+i, 0.04, size=len(y))
@@ -322,19 +315,20 @@ P.show()
 # -----------------------
 # Uncertainty associated to estimation
 data = state_ensembles * cmro2_by_M
+# -----------------------
+# Corrections associated to estimation overall
+numBoxes = data.shape[0]  # now robust
+x_obs = np.arange(1, numBoxes + 1)
+
 fig, ax = plt.subplots(figsize=(10, 6))
 cov_track = np.array([np.std(array) for array in data])
-<<<<<<< HEAD
-ax.plot(cov_track, marker='o')
-=======
 ax.plot(x_obs, cov_track)
->>>>>>> 876241a (Better plot but bad performances. The code allow length scale tuning. load data handle comment in txt file)
 # Labels and title
 plt.ylabel('Estimated CMRO2 Uncertainty (umol /cm^3 /min)')
 plt.xlabel('Id DataPoint')
 plt.title('EnKF Uncertainty')
 plt.grid(True)
-plt.xticks(x_obs, [f'Obs {i}' for i in x_obs])
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
 plt.axhline(y=np.mean(cov_track), color='r', linestyle='--', label='Mean Uncertainty')
 plt.legend()
 plt.tight_layout()
@@ -350,7 +344,22 @@ plt.ylabel('Estimated CMRO2 Corrections (umol /cm^3 /min)')
 plt.xlabel('Id DataPoint')
 plt.title('EnKF Corrections "Kd" - Iterative Estimation')
 plt.grid(True)
-plt.xticks(x_obs, [f'Obs {i}' for i in x_obs])
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.show()
+# plt.savefig('enkf_corrections_test.png', dpi=300, bbox_inches='tight')
+
+# -----------------------
+# Corrections associated to estimation overall
+numBoxes = corrections_overall.shape[0]  # now robust
+x_obs = np.arange(1, numBoxes + 1)
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(x_obs, corrections_overall, marker='o', linestyle='-', color='orange')
+# Labels and title
+plt.ylabel('Estimated CMRO2 Corrections (umol /cm^3 /min)')
+plt.xlabel('Id DataPoint')
+plt.title('EnKF Corrections "Kd" - Iterative Estimation')
+plt.grid(True)
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
 plt.show()
 # plt.savefig('enkf_corrections_test.png', dpi=300, bbox_inches='tight')
 
@@ -410,11 +419,7 @@ fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
 plt.show()
 # plt.savefig('pdf_surface_plot_test.png', dpi=300, bbox_inches='tight')
 
-<<<<<<< HEAD
-# # Save the data
-=======
 # Save the data
->>>>>>> 876241a (Better plot but bad performances. The code allow length scale tuning. load data handle comment in txt file)
 # path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/EnKF_real_data_iterative/"
 # np.save(path + f"state_ensembles_{n_ensembles}.npy", state_ensembles)
 # np.save(path + f"cmro2_means_{n_ensembles}.npy", cmro2_mean_)
