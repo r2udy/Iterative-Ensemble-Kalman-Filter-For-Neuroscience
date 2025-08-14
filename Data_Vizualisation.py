@@ -17,8 +17,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from circlesearch import Po2Analyzer
-from scipy.ndimage import gaussian_filter
-from Po2Dataset import load_data
+from Po2Dataset import load_data, get_cells_by_angle
 import pylab as P
 
 
@@ -48,29 +47,10 @@ pixel_size = 10
 
 ####################
 # Data Vizualation #
-####################
-observations = []
-for i, entry in enumerate(uniform_dataset):
-    art_id, dth_id = entry[0][0], entry[0][1]
-    array = df_copy[(df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id )]['pO2Value'].tolist()[0].copy()
-    observations.append(array - 14.049259355414593)
-    plt.show()
-observations = np.array(observations)
-print(f"Total observations: {observations.shape}")
-
-observations_min = np.zeros(observations.shape[0])
-for i, map in enumerate(observations):
-   observations_min[i] = np.min(map)
-   print(f"Map min: {map.min()}, Map max: {map.max()}, Map mean: {map.mean()}, Map std: {map.std()}")
-print(f"The means of of all map mins: {observations_min.mean()}")
-
-# Normalize the observations
-observations_normalized = (observations - np.min(observations)) / (np.max(observations) - np.min(observations))
-
 # Select your the data
-art_id, dth_id = (7, 2)
+art_id, dth_id = (2, 3)
 # Angle ranges: from 0 to 90 degrees and from 270 to 360 degrees
-angle_ranges = [(75, 80), (80, 180)]
+angle_ranges = [(20, 60), (210, 250)]
 n = 20 # data sizes
 
 # Load the map
@@ -122,119 +102,162 @@ plt.title("Inner and Outer radius search")
 plt.legend()
 plt.show()
 
-# # --------------------------------
-# def get_cells_by_angle(grid_size, origin, angle_ranges, distance_range=None):
-#     x0, y0 = origin
-#     selected_cells = []
+# --------- Plotting the angle mask ---------
+import math
+import numpy as np
+import matplotlib.pyplot as plt
 
-#     for y in range(grid_size):
-#         for x in range(grid_size):
-#             dx = x - x0
-#             dy = y0 - y  # reverse y if needed (grid coordinates)
-            
-#             angle = math.degrees(math.atan2(dy, dx)) % 360
-#             distance = math.hypot(dx, dy)
+# --------------------------------
+def build_obs_covariance(
+    grid_size=20,
+    origin=(10,10),
+    angle_ranges=[(20, 60), (210, 250)],
+    min_radius=5,
+    max_radius=None,
+    high_var=15.0**2,
+    sigma2=1.0**2,
+    length_scale=3.0
+):
+    """
+    Build a 2D covariance matrix for a grid_size x grid_size PO2 map.
 
-#             # Check angle ranges
-#             in_angle = any(
-#                 start <= angle <= end if start <= end else angle >= start or angle <= end
-#                 for (start, end) in angle_ranges
-#             )
-            
-#             # Check distance range if given
-#             in_distance = True
-#             if distance_range:
-#                 min_d, max_d = distance_range
-#                 in_distance = min_d <= distance <= max_d
+    High-uncertainty cells (angle_ranges + min_radius) -> variance=high_var, uncorrelated.
+    Low-uncertainty cells -> spatially correlated with Gaussian decay.
 
-#             if in_angle and in_distance:
-#                 selected_cells.append((x, y))
-    
-#     return selected_cells
+    Returns:
+        C: covariance matrix (grid_size^2 x grid_size^2)
+    """
+    if max_radius is None:
+        max_radius = math.hypot(grid_size, grid_size)
 
-# grid_size = 20
-# origin = (10, 10)
+    # --- Function to get targeted cells ---
+    def get_cells_by_angle(grid_size, origin, angle_ranges, distance_range=None):
+        x0, y0 = origin
+        selected_cells = []
+        for y in range(grid_size):
+            for x in range(grid_size):
+                dx = x - x0
+                dy = y0 - y
+                angle = math.degrees(math.atan2(dy, dx)) % 360
+                distance = math.hypot(dx, dy)
+                in_angle = any(
+                    start <= angle <= end if start <= end else angle >= start or angle <= end
+                    for (start, end) in angle_ranges
+                )
+                in_distance = True
+                if distance_range:
+                    min_d, max_d = distance_range
+                    in_distance = min_d <= distance <= max_d
+                if in_angle and in_distance:
+                    selected_cells.append((x, y))
+        return selected_cells
 
-# # Modify distance range to target from a given radius (e.g., 8 units) to the edge of the map
-# min_radius = 5
-# max_radius = math.hypot(grid_size, grid_size)  # furthest possible distance in the grid
+    # --- Identify high-uncertainty cells ---
+    selected_cells_border = get_cells_by_angle(
+        grid_size, origin, angle_ranges, distance_range=(min_radius, max_radius)
+    )
 
-# # Get updated selected cells
-# selected_cells_border = get_cells_by_angle(
-#     grid_size,
-#     origin,
-#     angle_ranges,
-#     distance_range=(min_radius, max_radius)
-# )
+    # --- Create grid coordinates ---
+    coords = np.array([(x, y) for y in range(grid_size) for x in range(grid_size)])
+    matrix_size = grid_size * grid_size
+    C = np.zeros((matrix_size, matrix_size))
 
-# # Plotting
-# fig, ax = plt.subplots(figsize=(6, 6))
-# ax.set_aspect('equal')
-# ax.set_xlim(0, grid_size)
-# ax.set_ylim(0, grid_size)
+    # --- Fill covariance matrix ---
+    for i in range(matrix_size):
+        xi, yi = coords[i]
 
-# # Draw grid
-# for x in range(grid_size + 1):
-#     ax.axvline(x, color='lightgray', linewidth=0.5)
-# for y in range(grid_size + 1):
-#     ax.axhline(y, color='lightgray', linewidth=0.5)
+        # High-uncertainty cell
+        if (xi, yi) in selected_cells_border:
+            C[i, i] = high_var
+            continue
 
-# # Highlight selected cells
-# for x, y in selected_cells_border:
-#     rect = plt.Rectangle((x, y), 1, 1, color='lightgreen')
-#     ax.add_patch(rect)
+        # Low-uncertainty cells: compute correlations with other low-uncertainty cells
+        for j in range(i, matrix_size):
+            xj, yj = coords[j]
 
-# # Mark origin
-# ox, oy = origin
-# origin_rect = plt.Rectangle((ox, oy), 1, 1, color='red')
-# ax.add_patch(origin_rect)
+            if (xj, yj) in selected_cells_border:
+                continue
 
-# # Axis labels
-# ax.set_xticks(range(grid_size))
-# ax.set_yticks(range(grid_size))
-# ax.grid(False)
+            d = np.sqrt((xi - xj) ** 2 + (yi - yj) ** 2)
+            cov_ij = sigma2 * np.exp(-d**2 / (2 * length_scale**2))
+            C[i, j] = cov_ij
+            C[j, i] = cov_ij
 
-# for angle_deg in angle_ranges[1] + (angle_ranges[0] if angle_ranges[0] else ()):
-#   angle_rad = np.deg2rad(angle_deg)
-#   x_end = rout * np.cos(angle_rad) + center[0]
-#   y_end = rout * np.sin(angle_rad) + center[1]
-# #   plt.plot([center[0], x_end], [center[1], y_end], 'k--', lw=1.5)
+    return C
 
+# --------------------------------
+# Example usage
+grid_size = 20
+origin = (10, 10)
+angle_ranges = [(20, 60), (210, 250)]
+min_radius = 5
+high_var = 3.0**2
+sigma2 = 1.0**2
+length_scale = 3.0
 
-# plt.title("Cells from Radius to Border in Given Angle Ranges")
-# plt.gca().invert_yaxis()
-# # plt.show()
+C = build_obs_covariance(
+    grid_size=grid_size,
+    origin=origin,
+    angle_ranges=angle_ranges,
+    min_radius=min_radius,
+    high_var=high_var,
+    sigma2=sigma2,
+    length_scale=length_scale
+)
 
+# --- Quick visualization: diagonal (variance) map ---
+uncertainty_map = np.diag(C).reshape((grid_size, grid_size))
+plt.figure(figsize=(6,6))
+plt.imshow(uncertainty_map, origin='upper', cmap='viridis')
+plt.colorbar(label='Variance')
+plt.title("Diagonal Variance Map of PO2 Covariance Matrix")
+plt.show()
 
-
-# # Create a 400x400 matrix initialized to zeros
-# matrix_size = 400
-# matrix = np.zeros((matrix_size, matrix_size))
-
-# # Set higher values for targeted cells and lower for non-targeted ones
-# high_value = 15.
-# low_value = 1.
-
-# # Create a 400x400 matrix for diagonals representing each cell of the 20x20 grid
-# matrix_diag = np.zeros((matrix_size, matrix_size))
-
-# # Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
-# grid_cells = [(x, y) for y in range(grid_size) for x in range(grid_size)]
-
-# # Assign higher or lower values to each diagonal cell based on whether it was targeted
-# for i, (x, y) in enumerate(grid_cells):
-#     value = high_value if (x, y) in selected_cells_border else low_value
-#     matrix_diag[i, i] = value
-
-# # Show the matrix
-# plt.figure(figsize=(6, 6))
-# plt.imshow(matrix_diag, cmap='viridis', origin='upper')
-# plt.title("Diagonal Matrix: 2D Map Cell Encoding")
-# plt.colorbar(label='Value')
-# plt.show()
+print("Covariance matrix shape:", C.shape)
+plt.figure(figsize=(6,6))
+plt.imshow(C, origin='upper', cmap='viridis')
+plt.colorbar(label='Variance')
+plt.title("Diagonal Variance Map of PO2 Covariance Matrix")
+plt.show()
 
 
 # ######################
+
+# ---------- Target Cells -----------
+# Adjust the observation covariance matrix to account very uncertain measurement
+max_radius = math.hypot(n, n)  # furthest possible distance in the grid
+
+# Targeted cells (by angle + from min_radius to border)
+selected_cells_border = get_cells_by_angle(
+    n,
+    center,
+    [angle_ranges[0], angle_ranges[1]],
+    distance_range=(min_radius, max_radius)
+)
+
+# ---- Build diagonal R with per-cell variances ----
+matrix_size = n * n
+matrix      = np.zeros((matrix_size, matrix_size))
+
+# Set higher values for targeted cells and lower for non-targeted ones
+high_value  = 3.**2
+low_value   = 1.**2
+
+# Create a 400x400 matrix for diagonals representing each cell of the 20x20 grid
+matrix_diag = np.zeros((matrix_size, matrix_size))
+
+# Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
+grid_cells = [(x, y) for y in range(n) for x in range(n)]
+
+# Assign higher or lower values to each diagonal cell based on whether it was targeted
+for k, (x, y) in enumerate(grid_cells):
+    matrix_diag[k, k] = high_value if (x, y) in selected_cells_border else low_value
+
+plt.figure(figsize=(6,6))
+plt.imshow(matrix_diag, origin='upper', cmap='viridis')
+plt.colorbar(label='Variance')
+plt.title("Diagonal Variance Map of PO2 Covariance Matrix")
+plt.show()
 
 
 # # Load and flatten

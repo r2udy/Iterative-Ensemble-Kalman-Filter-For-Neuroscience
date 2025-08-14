@@ -19,12 +19,10 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.stats import gaussian_kde, norm
+from scipy.stats import gaussian_kde
 from EnKF_FEM import EnKF
 from circlesearch import Po2Analyzer
 from MapGenerator import MapGenerator
-from lsqnonlin import Po2Fitter
 from Po2Dataset import load_data, get_cells_by_angle
 import pylab as P
 
@@ -47,14 +45,11 @@ cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
 M_var = cmro2_var / cmro2_by_M**2
 M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
 obs_var_high = 15.**2
-obs_var_low = 1.0**2 # measurement uncertainty
+obs_var_low = 1.**2 # measurement uncertainty
 beta = 1/50
 
 n = 20 # data size
 pixel_size = 10
-
-tol_correction = .5
-max_inner_iterations = 8
 
 # Create coordinate grids in physical units (microns)
 X, Y = np.meshgrid(np.arange(n), np.arange(n))
@@ -101,7 +96,6 @@ state_ensembles = []
 state_ensembles_overall = []
 stats_overall = []
 corrections_overall = []
-ensembles_trials = np.zeros((max_inner_iterations, n_ensembles))
 N_it = []
 corrections = []
 
@@ -135,87 +129,80 @@ for i, entry in enumerate(uniform_dataset):
 
     # ---------- Target Cells -----------
     # Adjust the observation covariance matrix to account very uncertain measurement
-    max_radius = math.hypot(n, n)  # furthest possible distance in the grid
+    grid_size = 20
+    origin = center
+    angle_ranges = [angles_1, angles_2]
+    min_radius = min_radius
+    high_var = obs_var_high
+    sigma2 = obs_var_low
+    length_scale = 3.0
 
-    # Targeted cells (by angle + from min_radius to border)
-    selected_cells_border = get_cells_by_angle(
-        n,
-        center,
-        [angles_1, angles_2],
-        distance_range=(min_radius, max_radius)
+    # C = enkf.build_obs_covariance(
+    #     grid_size=grid_size,
+    #     origin=origin,
+    #     angle_ranges=angle_ranges,
+    #     min_radius=min_radius,
+    #     high_var=high_var,
+    #     sigma2=sigma2,
+    #     length_scale=length_scale
+    # )
+
+    C_diag = enkf.build_obs_covariance_diagonal(
+        grid_size=grid_size,
+        origin=origin,
+        angle_ranges=angle_ranges,
+        min_radius=min_radius,
+        obs_var_high=obs_var_high,
+        obs_var_low=obs_var_low
     )
 
-    # ---- Build diagonal R with per-cell variances ----
-    matrix_size = n * n
-    matrix      = np.zeros((matrix_size, matrix_size))
-
-    # Set higher values for targeted cells and lower for non-targeted ones
-    high_value  = obs_var_high
-    low_value   = obs_var_low
-
-    # Create a 400x400 matrix for diagonals representing each cell of the 20x20 grid
-    matrix_diag = np.zeros((matrix_size, matrix_size))
-
-    # Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
-    grid_cells = [(x, y) for y in range(n) for x in range(n)]
-
-    # Assign higher or lower values to each diagonal cell based on whether it was targeted
-    for k, (x, y) in enumerate(grid_cells):
-        matrix_diag[k, k] = high_value if (x, y) in selected_cells_border else low_value
-
-    R = matrix_diag
+    R = C_diag
     enkf.set_observation_noise(R)
 
-    for inner_iter in range(max_inner_iterations):
-        print(f"\n\nIteration {inner_iter + 1} of {max_inner_iterations} for observation (arteriole {art_id}, depth {dth_id})")
+    # ----------------------
+    # EnKF steps
+    enkf.predict()
+    enkf.update(obs)
 
-        # ----------------------
-        # EnKF steps
-        enkf.predict()
-        enkf.update(obs)
+    # Get current estimate
+    mean, cov = enkf.get_state_estimate()
 
-        # Get current estimate
-        mean, cov = enkf.get_state_estimate()
+    # Means and Covariances
+    cmro2_mean  = mean[0] * cmro2_by_M
+    cmro2_cov   = cov * (cmro2_by_M)**2
+    correction = np.abs(np.mean(enkf.K @ enkf.innovation) * cmro2_by_M)
 
-        # Means and Covariances
-        cmro2_mean  = mean[0] * cmro2_by_M
-        cmro2_cov   = cov * (cmro2_by_M)**2
-        correction = np.abs(np.mean(enkf.K @ enkf.innovation) * cmro2_by_M)
+    # Compute the absolute error
+    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                        pvessel=p_vessel, 
+                        Rves=Rves, 
+                        R0=R0, 
+                        Rt=R0)
+    error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
 
-        # Compute the absolute error
-        generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                            pvessel=p_vessel, 
-                            Rves=Rves, 
-                            R0=R0, 
-                            Rt=R0)
-        error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+    # Print the results
+    print(f"Correction: {correction}")
+    print(f"Mean Absolute Error: {error_enkf.mean()}")    
 
-        # Print the results
-        print(f"Correction: {correction}")
-        print(f"Mean Absolute Error: {error_enkf.mean()}")    
+    # Results tracking overall iterations
+    state_ensembles_overall.append(enkf.ensemble.copy())
+    stats_overall.append((cmro2_mean, cmro2_cov))
+    corrections_overall.append(correction) # Save the correction term
 
-        # Results tracking
-        state_ensembles_overall.append(enkf.ensemble.copy())
-        stats_overall.append((cmro2_mean, cmro2_cov))
-        corrections_overall.append(correction) # Save the correction term
+    # If the convergence criteria is met, save the results
+    cmro2_est_enkf.append(cmro2_mean)
+    cmro2_cov_est_enkf.append(cmro2_cov)
+    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
+    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
+    corrections.append(correction) # Save the correction term
 
-        if correction < tol_correction or inner_iter == max_inner_iterations - 1:
-            # If the convergence criteria is met, save the results
-            cmro2_est_enkf.append(cmro2_mean)
-            cmro2_cov_est_enkf.append(cmro2_cov)
-            state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
-            errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-            corrections.append(correction) # Save the correction term
-            N_it.append(inner_iter + 1) # Save the number of iterations for this observation
-            break
-
-        # Print results in the terminal
-        print(f"\n\n Ensemble Kalman Filter paramaters estimation")
-        print("-"*65)
-        print(f"Observation ID: {art_id}, Depth ID: {dth_id}")
-        print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
-        print(f"Mean Absolute Error: {error_enkf.mean()}")
-        print(f"Correction: {correction}")
+    # Print results in the terminal
+    print(f"\n\n Ensemble Kalman Filter paramaters estimation")
+    print("-"*65)
+    print(f"Observation ID: {art_id}, Depth ID: {dth_id}")
+    print(f"\nCMRO2 Mean: {cmro2_mean}, Rves: {Rves}, R0: {R0}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}\n")
+    print(f"Mean Absolute Error: {error_enkf.mean()}")
+    print(f"Correction: {correction}")
 
 cmro2_est_enkf = np.array(cmro2_est_enkf)
 cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
@@ -307,7 +294,7 @@ for i in range(numBoxes):
     P.plot(x, y, 'r.', alpha=0.2)
 P.xlabel('$PO_{2}$ Map ID')
 P.ylabel('Absolute Partial Pressure Error')
-P.title('Absolute Errors Rpartition - EnKF')
+P.title('Absolute Errors distributions - EnKF')
 P.grid(True)
 P.show()
 # P.savefig('enkf_absolute_error_test.png', dpi=300, bbox_inches='tight')

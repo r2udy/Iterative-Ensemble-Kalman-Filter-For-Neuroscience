@@ -4,25 +4,13 @@ Created on Tue Jun 24 11:25:24 2025
 
 @author: ruudy
 """
-
+import math
 import numpy as np
-import matplotlib.pyplot as plt
-import ufl
-import gmsh
-import basix
-import dolfinx.plot
-import pyvista
-from Core.Mesh import plot_mesh_with_physical_groups, create_mesh
-from dolfinx import fem, io, mesh, log
-from dolfinx.io import XDMFFile, gmshio
-from dolfinx.fem.petsc import NonlinearProblem
-from dolfinx.nls.petsc import NewtonSolver
 from mpi4py import MPI
-from petsc4py.PETSc import ScalarType
 from typing import Callable, Optional
 from circlesearch import Po2Analyzer
-from multiprocessing import Pool
 from scipy.interpolate import griddata
+from Po2Dataset import get_cells_by_angle
 from FEM_code.generateMesh_Solver_one_hole import HoleGeometry, DiffusionSolver, SolverParameters
 
 class EnKF:
@@ -84,11 +72,136 @@ class EnKF:
 
     def set_process_noise(self, Q: np.ndarray):
         """Set the background noise covariance matrix"""
-        self.Q = np.sqrt(Q)
+        self.Q = (Q)
     
     def set_observation_noise(self, R: np.ndarray):
         """Set the observation noise covariance matrix"""
-        self.R = np.sqrt(R)
+        self.R = (R)
+    
+    def build_obs_covariance(
+        self,
+        grid_size=20,
+        origin=(10,10),
+        angle_ranges=[(20, 60), (210, 250)],
+        min_radius=5,
+        max_radius=None,
+        high_var=15.0**2,
+        sigma2=1.0**2,
+        length_scale=3.0
+    ):
+        """
+        Build a 2D covariance matrix for a grid_size x grid_size PO2 map.
+
+        High-uncertainty cells (angle_ranges + min_radius) -> variance=high_var, uncorrelated.
+        Low-uncertainty cells -> spatially correlated with Gaussian decay.
+
+        Returns:
+            C: covariance matrix (grid_size^2 x grid_size^2)
+        """
+        if max_radius is None:
+            max_radius = math.hypot(grid_size, grid_size)
+
+        # --- Function to get targeted cells ---
+        def get_cells_by_angle(grid_size, origin, angle_ranges, distance_range=None):
+            x0, y0 = origin
+            selected_cells = []
+            for y in range(grid_size):
+                for x in range(grid_size):
+                    dx = x - x0
+                    dy = y0 - y
+                    angle = math.degrees(math.atan2(dy, dx)) % 360
+                    distance = math.hypot(dx, dy)
+                    in_angle = any(
+                        start <= angle <= end if start <= end else angle >= start or angle <= end
+                        for (start, end) in angle_ranges
+                    )
+                    in_distance = True
+                    if distance_range:
+                        min_d, max_d = distance_range
+                        in_distance = min_d <= distance <= max_d
+                    if in_angle and in_distance:
+                        selected_cells.append((x, y))
+            return selected_cells
+
+        # --- Identify high-uncertainty cells ---
+        selected_cells_border = get_cells_by_angle(
+            grid_size, origin, angle_ranges, distance_range=(min_radius, max_radius)
+        )
+
+        # --- Create grid coordinates ---
+        coords = np.array([(x, y) for y in range(grid_size) for x in range(grid_size)])
+        matrix_size = grid_size * grid_size
+        C = np.zeros((matrix_size, matrix_size))
+
+        # --- Fill covariance matrix ---
+        for i in range(matrix_size):
+            xi, yi = coords[i]
+
+            # High-uncertainty cell
+            if (xi, yi) in selected_cells_border:
+                C[i, i] = high_var
+                continue
+
+            # Low-uncertainty cells: compute correlations with other low-uncertainty cells
+            for j in range(i, matrix_size):
+                xj, yj = coords[j]
+
+                if (xj, yj) in selected_cells_border:
+                    continue
+
+                d = np.sqrt((xi - xj) ** 2 + (yi - yj) ** 2)
+                cov_ij = sigma2 * np.exp(-d**2 / (2 * length_scale**2))
+                C[i, j] = cov_ij
+                C[j, i] = cov_ij
+
+        return C
+    
+    def build_obs_covariance_diagonal(
+        self,
+        grid_size=20,
+        origin=(10,10),
+        angle_ranges=[(20, 60), (210, 250)],
+        min_radius=5,
+        obs_var_high=15.0**2,
+        obs_var_low=1.0**2
+    ):
+        """
+        Build a diagonal covariance matrix for a grid_size x grid_size PO2 map.
+
+        High-uncertainty cells (angle_ranges + min_radius) -> variance=high_var, uncorrelated.
+        Low-uncertainty cells -> variance=sigma2.
+
+        Returns:
+            C: diagonal covariance matrix (grid_size^2,)
+        """
+        max_radius = math.hypot(grid_size, grid_size)  # furthest possible distance in the grid
+        # Targeted cells (by angle + from min_radius to border)
+        selected_cells_border = get_cells_by_angle(
+            grid_size,
+            origin,
+            [angle_ranges[0], angle_ranges[1]],
+            distance_range=(min_radius, max_radius)
+        )
+
+        # ---- Build diagonal R with per-cell variances ----
+        matrix_size = grid_size * grid_size
+        matrix      = np.zeros((matrix_size, matrix_size))
+
+        # Set higher values for targeted cells and lower for non-targeted ones
+        high_value  = obs_var_high
+        low_value   = obs_var_low
+
+        # Create a 400x400 matrix for diagonals representing each cell of the 20x20 grid
+        matrix_diag = np.zeros((matrix_size, matrix_size))
+
+        # Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
+        grid_cells = [(x, y) for y in range(grid_size) for x in range(grid_size)]
+
+        # Assign higher or lower values to each diagonal cell based on whether it was targeted
+        for k, (x, y) in enumerate(grid_cells):
+            matrix_diag[k, k] = high_value if (x, y) in selected_cells_border else low_value
+
+        return matrix_diag
 
     def observation_operator(self, observation: np.ndarray, state: np.ndarray):
         """
