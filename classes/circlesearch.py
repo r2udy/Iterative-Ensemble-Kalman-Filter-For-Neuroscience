@@ -11,9 +11,7 @@ from scipy.ndimage import gaussian_filter
 
 class Po2Analyzer:
     def __init__(self,
-                 pO2_array: np.ndarray,
-                 r0: float = 0.0,
-                 pixel_size: float = 10.0,
+                 pO2_array: np.ndarray
                  ):
         
         # Constants conversion
@@ -28,10 +26,9 @@ class Po2Analyzer:
         self.pO2_value = pO2_array
         self.sigma = 2.0  # for Gaussian smoothing
         self.smooth_data = gaussian_filter(self.pO2_value, sigma=self.sigma)
-        self.pixel_size = pixel_size
+        self.pixel_size = 10.
         self.rows, self.cols = self.pO2_value.shape
         self.X, self.Y = np.meshgrid(np.arange(self.cols), np.arange(self.rows))
-        self.r0 = r0
         self.p_vessel = np.max(self.pO2_value)
         
         self.Gx, self.Gy = np.gradient(self.pO2_value)
@@ -39,9 +36,9 @@ class Po2Analyzer:
         self.distance_map = self._compute_distance_map()
         
     def find_circles(self, min_r: int = 1, angle_range1_deg=(0, 0), angle_range2_deg=None, win_size: int = 3):
-        max_row, max_col = np.unravel_index(np.argmax(self.pO2_value), self.pO2_value.shape)
-        row_range = range(max(max_row - win_size, 0), min(max_row + win_size + 1, self.rows))
-        col_range = range(max(max_col - win_size, 0), min(max_col + win_size + 1, self.cols))
+        center_row, center_col = 10, 10  # Default center for the search window
+        row_range = range(max(center_row - win_size, 0), min(center_row + win_size + 1, self.rows))
+        col_range = range(max(center_col - win_size, 0), min(center_col + win_size + 1, self.cols))
         
         outer_circle_list = []
         inner_circle_list = []

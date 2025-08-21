@@ -20,10 +20,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import gaussian_kde
-from EnKF_FEM import EnKF
+from EnKF_FEM import EnKF, build_obs_covariance, build_obs_covariance_diagonal
 from circlesearch import Po2Analyzer
 from MapGenerator import MapGenerator
-from Po2Dataset import load_data, get_cells_by_angle
+from Po2Dataset import load_data
 import pylab as P
 
 # --------- Load data --------- #
@@ -37,16 +37,17 @@ uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 # Constants initial #
 D = 4.0e3
 alpha = 1.39e-15
-cmro2_low, cmro2_high = 1, 3 # umol/cm3/min
 cmro2_by_M = (60 * D * alpha * 1e12)
 
 cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
-M_var = cmro2_var / cmro2_by_M**2
+M_var = cmro2_var / cmro2_by_M**2 / 5
 M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
 obs_var_high = 15.**2
 obs_var_low = 1.**2 # measurement uncertainty
-beta = 1/50
+acceptance_rate = 1.
+count = 0
+max_inner_iterations = 10
 
 n = 20 # data size
 pixel_size = 10
@@ -79,15 +80,14 @@ enkf = EnKF(state_dim, obs_dim, n_ensembles, dynamics_model, seed)
 enkf.initialize_ensemble(a, b)
     
 # Update the the background noise
-Q = np.array([[M_var]])         # Background covariance matrix
-enkf.set_process_noise(Q)
+B = np.array([[M_var]])         # Background covariance matrix
+enkf.set_process_noise(B)
 
 # -------------------------
 # Initialization of Arrays
 observations_id = [entry for entry in uniform_dataset]
 observations = []
 cmro2_est_enkf = []
-cmro2_est_lsqnonlin = []
 cmro2_cov_est_enkf = []
 means = []
 covariances = []
@@ -98,8 +98,6 @@ stats_overall = []
 corrections_overall = []
 N_it = []
 corrections = []
-
-count = 1
 
 # --------------------------
 # Simulate a sequence with observation for the uniform case
@@ -133,21 +131,8 @@ for i, entry in enumerate(uniform_dataset):
     origin = center
     angle_ranges = [angles_1, angles_2]
     min_radius = min_radius
-    high_var = obs_var_high
-    sigma2 = obs_var_low
-    length_scale = 3.0
 
-    # C = enkf.build_obs_covariance(
-    #     grid_size=grid_size,
-    #     origin=origin,
-    #     angle_ranges=angle_ranges,
-    #     min_radius=min_radius,
-    #     high_var=high_var,
-    #     sigma2=sigma2,
-    #     length_scale=length_scale
-    # )
-
-    C_diag = enkf.build_obs_covariance_diagonal(
+    C_diag = build_obs_covariance_diagonal(
         grid_size=grid_size,
         origin=origin,
         angle_ranges=angle_ranges,
@@ -155,46 +140,71 @@ for i, entry in enumerate(uniform_dataset):
         obs_var_high=obs_var_high,
         obs_var_low=obs_var_low
     )
-
     R = C_diag
     enkf.set_observation_noise(R)
 
-    # ----------------------
-    # EnKF steps
-    enkf.predict()
-    enkf.update(obs)
+    for inner_iteration in range(max_inner_iterations):
+        # ----------------------
+        # EnKF steps
+        enkf.predict()
+        enkf.update(obs)
 
-    # Get current estimate
-    mean, cov = enkf.get_state_estimate()
+        # Get current estimate
+        mean, cov = enkf.get_state_estimate()
 
-    # Means and Covariances
-    cmro2_mean  = mean[0] * cmro2_by_M
-    cmro2_cov   = cov * (cmro2_by_M)**2
-    correction = np.abs(np.mean(enkf.K @ enkf.innovation) * cmro2_by_M)
+        # Means and Covariances
+        cmro2_mean  = mean[0] * cmro2_by_M
+        cmro2_cov   = cov * (cmro2_by_M)**2
+        correction = np.abs(np.mean(enkf.length_scale * enkf.K @ enkf.innovation) * cmro2_by_M)
 
-    # Compute the absolute error
-    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                        pvessel=p_vessel, 
-                        Rves=Rves, 
-                        R0=R0, 
-                        Rt=R0)
-    error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+        # Compute the absolute error
+        generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                            pvessel=p_vessel, 
+                            Rves=Rves, 
+                            R0=R0, 
+                            Rt=R0)
+        error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
 
-    # Print the results
-    print(f"Correction: {correction}")
-    print(f"Mean Absolute Error: {error_enkf.mean()}")    
+        # Print the results
+        print(f"Correction: {correction}")
+        print(f"Mean Absolute Error: {error_enkf.mean()}")    
 
-    # Results tracking overall iterations
-    state_ensembles_overall.append(enkf.ensemble.copy())
-    stats_overall.append((cmro2_mean, cmro2_cov))
-    corrections_overall.append(correction) # Save the correction term
+        # Results tracking overall iterations
+        state_ensembles_overall.append(enkf.ensemble.copy())
+        stats_overall.append((cmro2_mean, cmro2_cov))
+        corrections_overall.append(correction) # Save the correction term
 
-    # If the convergence criteria is met, save the results
-    cmro2_est_enkf.append(cmro2_mean)
-    cmro2_cov_est_enkf.append(cmro2_cov)
-    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
-    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-    corrections.append(correction) # Save the correction term
+        # If the samples are accepted
+        if np.abs(correction) < acceptance_rate:
+            count += 1
+
+            B = B / 2
+            enkf.set_process_noise(B)  # Reset the process noise for the next iteration
+            acceptance_rate = acceptance_rate * 0.5
+            enkf.length_scale = (.5)**(count)  # Set the length scale for the covariance matrix
+
+            if count > 2:
+                cmro2_est_enkf.append(cmro2_mean)
+                cmro2_cov_est_enkf.append(cmro2_cov)
+                state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
+                errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
+                corrections.append(correction) # Save the correction term
+                break
+                    
+        elif inner_iteration == max_inner_iterations - 1:
+            print(f"Inner iteration {inner_iteration + 1} reached maximum iterations without convergence.")
+            cmro2_est_enkf.append(cmro2_mean)
+            cmro2_cov_est_enkf.append(cmro2_cov)
+            state_ensembles.append(enkf.ensemble.copy())
+
+    
+    
+    N_it.append(count)
+    count = 0
+    # Reset the EnKF parameter
+    enkf.length_scale = 1.0  # Reset the length scale for each observation
+    B = np.array([[M_var]])  # Reset the background covariance matrix
+    enkf.set_process_noise(B)
 
     # Print results in the terminal
     print(f"\n\n Ensemble Kalman Filter paramaters estimation")
@@ -211,6 +221,7 @@ state_ensembles = np.array(state_ensembles)
 stats_overall = np.array(stats_overall)
 corrections_overall = np.array(corrections_overall)
 state_ensembles_overall = np.array(state_ensembles_overall)
+
 
 
 # ------------------------------------------------------------------
@@ -324,8 +335,11 @@ plt.show()
 
 # -----------------------
 # Corrections associated to estimation
+numBoxes = corrections.shape[0]  # now robust
+x_obs = np.arange(1, numBoxes + 1)
+
 fig, ax = plt.subplots(figsize=(10, 6))
-ax.plot(x_obs, corrections, marker='o', linestyle='-', color='orange')
+ax.plot(x_obs, corrections, marker='o', color='orange')
 # Labels and title
 plt.ylabel('Estimated CMRO2 Corrections (umol /cm^3 /min)')
 plt.xlabel('Id DataPoint')
@@ -340,7 +354,7 @@ plt.show()
 numBoxes = corrections_overall.shape[0]  # now robust
 x_obs = np.arange(1, numBoxes + 1)
 fig, ax = plt.subplots(figsize=(10, 6))
-ax.plot(x_obs, corrections_overall, marker='o', linestyle='-', color='orange')
+ax.plot(x_obs, corrections_overall, marker='o', color='orange')
 # Labels and title
 plt.ylabel('Estimated CMRO2 Corrections (umol /cm^3 /min)')
 plt.xlabel('Id DataPoint')
@@ -369,7 +383,7 @@ plt.fill_between(
 plt.xlabel('Id DataPoint')
 plt.ylabel('CMRO2 (umol /cm^3 /min)')
 plt.title('EnKF CMRO2 Estimation *OVERALL* with Uncertainty')
-plt.xticks(x_obs, [f'Obs {i}' for i in x_obs])
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
 plt.axhline(y=np.mean(cmro2_mean_), color='r', linestyle='--', label='Mean CMRO2')
 plt.axhline(y=cmro2_lower, color='orange', linestyle='--', label='CMRO2 Lower Bound (Prior)')
 plt.axhline(y=cmro2_upper, color='orange', linestyle='--', label='CMRO2 Upper Bound (Prior)')

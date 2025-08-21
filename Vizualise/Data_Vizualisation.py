@@ -15,11 +15,12 @@ sys.path.append(py_file_location)
 import math
 import numpy as np
 import pandas as pd
+import matplotlib.tri as tri
 import matplotlib.pyplot as plt
 from circlesearch import Po2Analyzer
 from Po2Dataset import load_data, get_cells_by_angle
+from EnKF_FEM import build_obs_covariance
 import pylab as P
-
 
 # --------- Load data --------- #
 df = pd.read_pickle(py_data_location + "/dataset.pkl")
@@ -39,79 +40,73 @@ alpha = 1.39e-15
 cmro2_low, cmro2_high = 1, 3 # umol/cm3/min
 cmro2_by_M = (60 * D * alpha * 1e12)
 
-cmro2_lower, cmro2_upper = 1.0, 3.0
-cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
-M_std = np.sqrt(cmro2_var) / cmro2_by_M
-
-pixel_size = 10
-
-####################
+# -------------------
 # Data Vizualation #
-# Select your the data
-art_id, dth_id = (2, 3)
+art_id, dth_id = (1, 2)
 # Angle ranges: from 0 to 90 degrees and from 270 to 360 degrees
-angle_ranges = [(20, 60), (210, 250)]
-n = 20 # data sizes
+angle_ranges = [(70, 110), (190, 260)]
+grid_size = 20 # data sizes
 
 # Load the map
-array = df_copy[(df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id )]['pO2Value'].tolist()[0]
-X = df_copy[(df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id )]['pointsX'].tolist()[0]
-Y = df_copy[(df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id )]['pointsY'].tolist()[0]
-grid_shape = (n, n)
-pO2_value = array.reshape(grid_shape, order='F') - np.min(array)
+mask    = (df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id)
+array   = df_copy[mask]['pO2Value'].tolist()[0]
+X       = df_copy[mask]['pointsX'].tolist()[0]
+Y       = df_copy[mask]['pointsY'].tolist()[0]
+Z       = array
+# Reshape the array to 20x20
+Z_array = np.array(Z).reshape((grid_size, grid_size), order='F')
 
 # Find circles
-analyzer = Po2Analyzer(pO2_value)
+analyzer = Po2Analyzer(Z_array)
 analyzer.find_circles()
 
 r_in = analyzer.rin
 r_out = analyzer.rout
 center = analyzer.center
-mask_outer = analyzer.mask_outer
-mask_inner = analyzer.mask_inner
-mask_angle = analyzer.mask_angle
-circumference_out = analyzer.circumference_out
 
-print(f'r_in is: {r_in}')
-print(f'r_out is: {r_out}')
+print(f"r_in = {r_in:.2f}, r_out = {r_out:.2f}, center = {center}")
 
-# --------- Plot Original + Circles ---------
-theta = np.linspace(0, 2 * np.pi, 100) # angles
-rin = r_in / pixel_size
-rout = r_out / pixel_size
-# Outer circle
-circle_outer_x = rout * np.cos(theta) + center[0]
-circle_outer_y = rout * np.sin(theta) + center[1]
-# Inner circle
-circle_inner_x = rin * np.cos(theta) + center[0]
-circle_inner_y = rin * np.sin(theta) + center[1]
 
-for angle_deg in angle_ranges[0] + (angle_ranges[1] if angle_ranges[1] else ()):
-  angle_rad = np.deg2rad(angle_deg)
-  x_end = rout * np.cos(angle_rad) + center[0]
-  y_end = rout * np.sin(angle_rad) + center[1]
-  plt.plot([center[0], x_end], [center[1], y_end], 'k--', lw=1.5)
+# ---------------
+# Figure
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-plt.pcolor(pO2_value, cmap='jet', shading='auto')
-plt.plot(circle_outer_x, circle_outer_y, '--', linewidth=2, color='cyan', label=f'Outer | radius = {r_out} μm')
-plt.plot(circle_inner_x, circle_inner_y, '-', linewidth=2, color='magenta', label=f'Inner | radius = {r_in} μm ')
-plt.plot(center[0], center[1], 'x', color='black', label='Center')
-plt.axis('equal')
-plt.colorbar()
-plt.title("Inner and Outer radius search")
-plt.legend()
-plt.show()
+ax = axes[0]
+c = ax.pcolormesh(Z_array, shading='auto', cmap='jet')
+fig.colorbar(c, label='pO₂')
+ax.set_title(f"Radial pO₂ Map | Arteriole {art_id} | Depth {dth_id}")
+ax.set_xlabel('X (pixels)')
+ax.set_ylabel('Y (pixels)')
+ax.axis('equal')
+
+# # --------- Plot Original + Circles ---------
+# triang = tri.Triangulation(X, Y)
+
+# plt.figure(figsize=(7, 6))
+# plt.tripcolor(triang, Z, shading="flat", cmap="jet")
+# plt.colorbar(label="pO₂")
+
+# theta = np.linspace(0, 2 * np.pi, 100) # angles
+# circle_in_x = center[0] + r_in*np.cos(theta)
+# circle_in_y = center[1] + r_in*np.sin(theta)
+# circle_out_x = center[0] + r_out*np.cos(theta)
+# circle_out_y = center[1] + r_out*np.sin(theta)
+
+# plt.plot(circle_in_x, circle_in_y, "m-", lw=2, label=f"Inner r={r_in:.1f}")
+# plt.plot(circle_out_x, circle_out_y, "c--", lw=2, label=f"Outer r={r_out:.1f}")
+# plt.plot(center[0], center[1], "kx", ms=8, label="Center")
+
+# plt.axis("equal")
+# plt.title(f"Radial pO₂ Map | Arteriole {art_id} | Depth {dth_id}")
+# plt.legend()
+# plt.show()
+
 
 # --------- Plotting the angle mask ---------
-import math
-import numpy as np
-import matplotlib.pyplot as plt
-
-# --------------------------------
 def build_obs_covariance(
     grid_size=20,
     origin=(10,10),
-    angle_ranges=[(20, 60), (210, 250)],
+    angle_ranges=[(0, 0), (0, 0)],
     min_radius=5,
     max_radius=None,
     high_var=15.0**2,
@@ -185,13 +180,14 @@ def build_obs_covariance(
 
     return C
 
+
 # --------------------------------
 # Example usage
-grid_size = 20
-origin = (10, 10)
-angle_ranges = [(20, 60), (210, 250)]
-min_radius = 5
-high_var = 3.0**2
+grid_size = grid_size
+origin = center
+angle_ranges = angle_ranges
+min_radius = 6
+high_var = 15.0**2
 sigma2 = 1.0**2
 length_scale = 3.0
 
@@ -207,36 +203,42 @@ C = build_obs_covariance(
 
 # --- Quick visualization: diagonal (variance) map ---
 uncertainty_map = np.diag(C).reshape((grid_size, grid_size))
-plt.figure(figsize=(6,6))
-plt.imshow(uncertainty_map, origin='upper', cmap='viridis')
-plt.colorbar(label='Variance')
-plt.title("Diagonal Variance Map of PO2 Covariance Matrix")
+ax = axes[1]
+c = ax.pcolormesh(uncertainty_map, cmap='viridis')
+fig.colorbar(c, label='Variance')
+ax.set_title("Diagonal Variance Map of PO2 Covariance Matrix")
+ax.set_xlabel('X (pixels)')
+ax.set_ylabel('Y (pixels)')
+ax.axis('equal')
+
 plt.show()
+
+
 
 print("Covariance matrix shape:", C.shape)
 plt.figure(figsize=(6,6))
 plt.imshow(C, origin='upper', cmap='viridis')
 plt.colorbar(label='Variance')
 plt.title("Diagonal Variance Map of PO2 Covariance Matrix")
-plt.show()
+# plt.show()
 
 
 # ######################
 
 # ---------- Target Cells -----------
 # Adjust the observation covariance matrix to account very uncertain measurement
-max_radius = math.hypot(n, n)  # furthest possible distance in the grid
+max_radius = math.hypot(grid_size, grid_size)  # furthest possible distance in the grid
 
 # Targeted cells (by angle + from min_radius to border)
 selected_cells_border = get_cells_by_angle(
-    n,
+    grid_size,
     center,
     [angle_ranges[0], angle_ranges[1]],
     distance_range=(min_radius, max_radius)
 )
 
 # ---- Build diagonal R with per-cell variances ----
-matrix_size = n * n
+matrix_size = grid_size * grid_size
 matrix      = np.zeros((matrix_size, matrix_size))
 
 # Set higher values for targeted cells and lower for non-targeted ones
@@ -247,7 +249,7 @@ low_value   = 1.**2
 matrix_diag = np.zeros((matrix_size, matrix_size))
 
 # Flatten the 20x20 grid into a 1D list of 400 positions corresponding to diagonals
-grid_cells = [(x, y) for y in range(n) for x in range(n)]
+grid_cells = [(x, y) for y in range(grid_size) for x in range(grid_size)]
 
 # Assign higher or lower values to each diagonal cell based on whether it was targeted
 for k, (x, y) in enumerate(grid_cells):
@@ -257,7 +259,7 @@ plt.figure(figsize=(6,6))
 plt.imshow(matrix_diag, origin='upper', cmap='viridis')
 plt.colorbar(label='Variance')
 plt.title("Diagonal Variance Map of PO2 Covariance Matrix")
-plt.show()
+# plt.show()
 
 
 # # Load and flatten
