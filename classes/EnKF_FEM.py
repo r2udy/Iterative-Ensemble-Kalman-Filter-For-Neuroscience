@@ -22,7 +22,7 @@ from FEM_code.generateMesh_Solver_one_hole import HoleGeometry, DiffusionSolver,
 def build_obs_covariance_diagonal(
     grid_size=20,
     origin=(10,10),
-    angle_ranges=[(20, 60), (210, 250)],
+    angle_ranges=[(0, 180), (180, 360)],
     min_radius=5,
     obs_var_high=15.0**2,
     obs_var_low=1.0**2
@@ -184,7 +184,7 @@ class EnKF:
         self.R = R
     
 
-    def observation_operator(self, observation: np.ndarray, state: np.ndarray):
+    def observation_operator(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray, state: np.ndarray):
         """
 
         Parameters
@@ -209,15 +209,15 @@ class EnKF:
         n = 20 # observation dimension
         observation.mean()
         observation_array = np.reshape(observation, (n, n)) # ensemble member observation (n by n)
-        analyzer = Po2Analyzer(observation_array)
+        analyzer = Po2Analyzer(observation_array, X, Y)
         analyzer.find_circles()
         
         # Extract parameters from state
         cmro2   = state * self.cmro2_by_M
         Pves    = np.max(observation)
-        Rves    = analyzer.rin
+        Rves    = 10. # analyzer.rin
         R0      = analyzer.rout
-        marker = 3
+        center = analyzer.center_ij
 
         # Generate mesh with dynamic radii
         # Initialize MPI
@@ -231,7 +231,7 @@ class EnKF:
         
         # Define holes
         holes = [
-            HoleGeometry(center=(0, 0, 0), radius_ves=params.Rves, radius_0=params.R0, marker=3),
+            HoleGeometry(center=(*center, 0), radius_ves=params.Rves, radius_0=params.R0, marker=3),
             ]
         
         # Generate mesh
@@ -255,7 +255,7 @@ class EnKF:
         y_min, y_max = np.min(y), np.max(y)
         
         # Create observation grid points
-        x_obs = np.linspace(x_min, x_max, n)
+        x_obs = X[0]
         y_obs = np.linspace(y_min, y_max, n)
         
         # Create simulation grid
@@ -284,8 +284,8 @@ class EnKF:
             
             # Add background noise
             self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.B)
-    
-    def update(self, observation: np.ndarray):
+
+    def update(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray):
         
         """
         Update step: adjust the ensemble based on observations
@@ -304,7 +304,7 @@ class EnKF:
         # Generate perturbed observations
         for i in range(self.n_ensembles):
             obs_ensemble[:, i] = observation + self.rng.multivariate_normal(
-                np.zeros(self.obs_dim), .5 * self.R
+                np.zeros(self.obs_dim), self.R
             )
         
         # Filter out observation parameter outside the annular 
@@ -312,7 +312,7 @@ class EnKF:
             # ensemble member state parameter
             state = self.ensemble[:, i]
             
-            obs_model = self.observation_operator(obs_ensemble[:, i], state)
+            obs_model = self.observation_operator(obs_ensemble[:, i], X, Y, state)
             obs_model_ensembles[:, i] = obs_model
 
         
@@ -324,6 +324,7 @@ class EnKF:
         obs_deviation = obs_model_ensembles - obs_mean[:, np.newaxis]
         
         # 2. Compute Kalman Gain
+        A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
         A_BHT = (state_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
         A_HBHT = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
         self.K = A_BHT @ np.linalg.inv(A_HBHT + self.R)

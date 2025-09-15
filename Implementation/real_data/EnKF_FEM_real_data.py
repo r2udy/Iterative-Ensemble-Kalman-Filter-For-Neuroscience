@@ -15,7 +15,6 @@ py_data_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff
 py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/classes/"
 sys.path.append(os.path.abspath(py_file_location))
 
-import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -38,24 +37,14 @@ uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 D = 4.0e3
 alpha = 1.39e-15
 cmro2_by_M = (60 * D * alpha * 1e12)
+grid_size = 20 # data size
 
 cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
-M_var = cmro2_var / cmro2_by_M**2 / 5
+M_var = cmro2_var / cmro2_by_M**2
 M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
-obs_var_high = 15.**2
+obs_var_high = 10.**2
 obs_var_low = 1.**2 # measurement uncertainty
-acceptance_rate = 1.
-count = 0
-max_inner_iterations = 10
-
-n = 20 # data size
-pixel_size = 10
-
-# Create coordinate grids in physical units (microns)
-X, Y = np.meshgrid(np.arange(n), np.arange(n))
-X = X * pixel_size
-Y = Y * pixel_size
 
 # --------------------------
 # EnKF Parameters
@@ -89,19 +78,15 @@ observations_id = [entry for entry in uniform_dataset]
 observations = []
 cmro2_est_enkf = []
 cmro2_cov_est_enkf = []
-means = []
-covariances = []
 errors_enkf = []
 state_ensembles = []
 state_ensembles_overall = []
 stats_overall = []
 corrections_overall = []
-N_it = []
 corrections = []
 
 # --------------------------
 # Simulate a sequence with observation for the uniform case
-# --------------------------
 for i, entry in enumerate(uniform_dataset):
     art_id = entry[0][0]
     dth_id = entry[0][1]
@@ -112,99 +97,122 @@ for i, entry in enumerate(uniform_dataset):
     min_radius = entry[3][0]
         
     # Observations
-    obs = df_copy[(df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id)]['pO2Value'].tolist()[0]
+    mask = (df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id)
+    obs = df_copy[mask]['pO2Value'].tolist()[0]
     observations.append(obs)
 
-    pO2_array = obs.reshape((n, n), order='F')
+    X = df_copy[mask]['pointsX'].tolist()[0]
+    Y = df_copy[mask]['pointsY'].tolist()[0]
+
+    pO2_array = obs.reshape((grid_size, grid_size), order='F')
     # Find Geometric parameters such as Rves and R0
-    analyzer = Po2Analyzer(pO2_array)
+    analyzer = Po2Analyzer(pO2_array, X, Y)
     analyzer.find_circles()
-    Rves = analyzer.rin
+    Rves = 10 # analyzer.rin
     R0 = analyzer.rout
     p_vessel = analyzer.p_vessel
-    center = analyzer.center
+    center = analyzer.center_ij
 
 
     # ---------- Target Cells -----------
     # Adjust the observation covariance matrix to account very uncertain measurement
-    grid_size = 20
-    origin = center
-    angle_ranges = [angles_1, angles_2]
-    min_radius = min_radius
-
-    C_diag = build_obs_covariance_diagonal(
+    R = build_obs_covariance_diagonal(
         grid_size=grid_size,
-        origin=origin,
-        angle_ranges=angle_ranges,
+        origin=center,
+        angle_ranges=[angles_1, angles_2],
         min_radius=min_radius,
         obs_var_high=obs_var_high,
         obs_var_low=obs_var_low
     )
-    R = C_diag
     enkf.set_observation_noise(R)
 
-    for inner_iteration in range(max_inner_iterations):
-        # ----------------------
-        # EnKF steps
-        enkf.predict()
-        enkf.update(obs)
+    # --- Quick visualization: diagonal (variance) map ---
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
-        # Get current estimate
-        mean, cov = enkf.get_state_estimate()
+    ax = axes[0]
+    c = ax.pcolormesh(pO2_array, shading='auto', cmap='jet')
+    fig.colorbar(c, label='pO₂')
+    ax.set_title(f"Radial pO₂ Map | Arteriole {art_id} | Depth {dth_id}")
+    ax.set_xlabel('X (pixels)')
+    ax.set_ylabel('Y (pixels)')
+    ax.axis('equal')
 
-        # Means and Covariances
-        cmro2_mean  = mean[0] * cmro2_by_M
-        cmro2_cov   = cov * (cmro2_by_M)**2
-        correction = np.abs(np.mean(enkf.length_scale * enkf.K @ enkf.innovation) * cmro2_by_M)
+    uncertainty_map = np.diag(R).reshape((grid_size, grid_size))
+    ax = axes[1]
+    c = ax.pcolormesh(uncertainty_map, cmap='viridis')
+    fig.colorbar(c, label='Variance')
+    ax.set_title("Diagonal Variance Map of PO2 Covariance Matrix")
+    ax.set_xlabel('X (pixels)')
+    ax.set_ylabel('Y (pixels)')
+    ax.axis('equal')
+    plt.show()
 
-        # Compute the absolute error
-        generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                            pvessel=p_vessel, 
-                            Rves=Rves, 
-                            R0=R0, 
-                            Rt=R0)
-        error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten())
+    # ----------------------
+    # EnKF steps
+    enkf.predict()
+    enkf.update(obs, X, Y)
 
-        # Print the results
-        print(f"Correction: {correction}")
-        print(f"Mean Absolute Error: {error_enkf.mean()}")    
+    # Get current estimate
+    mean, cov = enkf.get_state_estimate()
 
-        # Results tracking overall iterations
-        state_ensembles_overall.append(enkf.ensemble.copy())
-        stats_overall.append((cmro2_mean, cmro2_cov))
-        corrections_overall.append(correction) # Save the correction term
+    # Means and Covariances
+    cmro2_mean  = mean[0] * cmro2_by_M
+    cmro2_cov   = cov * (cmro2_by_M)**2
+    correction = np.abs(np.mean(enkf.length_scale * enkf.K @ enkf.innovation) * cmro2_by_M)
 
-        # If the samples are accepted
-        if np.abs(correction) < acceptance_rate:
-            count += 1
+    # Compute the absolute error
+    print(f'CMRO_2: {cmro2_mean}')
+    print(f"p_vessel: {p_vessel}")
+    print(f'Rves: {Rves}')
+    print(f'R0: {R0}')
+    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                        pvessel=p_vessel, 
+                        Rves=Rves, 
+                        R0=R0, 
+                        Rt=R0)
+    error_enkf = np.abs(obs - generator_enkf.pO2_array.flatten()) * 100 / np.abs(obs) 
 
-            B = B / 2
-            enkf.set_process_noise(B)  # Reset the process noise for the next iteration
-            acceptance_rate = acceptance_rate * 0.5
-            enkf.length_scale = (.5)**(count)  # Set the length scale for the covariance matrix
+    # 3D plot
+    fig = plt.figure(figsize=(10, 7))
+    ax = fig.add_subplot(111, projection='3d')
+    error_enkf_array = error_enkf.reshape((grid_size, grid_size), order='F')
+    sc = ax.plot_surface(X, Y, error_enkf_array, cmap='viridis', edgecolor='none')
+    ax.set_xlabel('x - axis')
+    ax.set_ylabel('y - axis')
+    ax.set_zlabel('z - axis')
+    ax.set_title(f"Map of relative error, \nmean relative error:{error_enkf.mean():.2f}; \nCMRO2:{cmro2_mean:.2f} umol /cm^3 /min")
+    plt.colorbar(sc, ax=ax, label='Color scale: Relative Error (%)')
+    plt.tight_layout()
+    plt.show()
 
-            if count > 2:
-                cmro2_est_enkf.append(cmro2_mean)
-                cmro2_cov_est_enkf.append(cmro2_cov)
-                state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
-                errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
-                corrections.append(correction) # Save the correction term
-                break
-                    
-        elif inner_iteration == max_inner_iterations - 1:
-            print(f"Inner iteration {inner_iteration + 1} reached maximum iterations without convergence.")
-            cmro2_est_enkf.append(cmro2_mean)
-            cmro2_cov_est_enkf.append(cmro2_cov)
-            state_ensembles.append(enkf.ensemble.copy())
+    # 3D plot
+    fig = plt.figure(figsize=(10, 7))
+    ax = fig.add_subplot(111, projection='3d')
+    error_enkf_array = error_enkf.reshape((grid_size, grid_size), order='F')
+    sc = ax.plot_surface(X, Y, generator_enkf.pO2_array, cmap='viridis', edgecolor='none')
+    ax.plot_surface(X, Y, pO2_array, cmap='viridis', edgecolor='none')
+    ax.set_xlabel('x - axis')
+    ax.set_ylabel('y - axis')
+    ax.set_zlabel('z - axis')
+    ax.set_title(f"Display of the approximated map: {cmro2_mean} umol /cm^3 /min")
+    plt.colorbar(sc, ax=ax, label='Color scale: Relative Error (%)')
+    plt.tight_layout()
+    plt.show()
 
-    
-    
-    N_it.append(count)
-    count = 0
-    # Reset the EnKF parameter
-    enkf.length_scale = 1.0  # Reset the length scale for each observation
-    B = np.array([[M_var]])  # Reset the background covariance matrix
-    enkf.set_process_noise(B)
+    # Print the results
+    print(f"Correction: {correction}")
+    print(f"Mean Absolute Error: {error_enkf.mean()}")    
+
+    # Results tracking overall iterations
+    state_ensembles_overall.append(enkf.ensemble.copy())
+    stats_overall.append((cmro2_mean, cmro2_cov))
+    corrections_overall.append(correction) # Save the correction term
+
+    cmro2_est_enkf.append(cmro2_mean)
+    cmro2_cov_est_enkf.append(cmro2_cov)
+    state_ensembles.append(enkf.ensemble.copy()) # Save the ensemble distribution for uncertainty quatitfication
+    errors_enkf.append(np.abs(error_enkf)) # Save the absolute errors
+    corrections.append(correction) # Save the correction term
 
     # Print results in the terminal
     print(f"\n\n Ensemble Kalman Filter paramaters estimation")
@@ -219,6 +227,7 @@ cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
 errors_enkf = np.array(errors_enkf)
 state_ensembles = np.array(state_ensembles)
 stats_overall = np.array(stats_overall)
+corrections = np.array(corrections)
 corrections_overall = np.array(corrections_overall)
 state_ensembles_overall = np.array(state_ensembles_overall)
 
@@ -226,9 +235,7 @@ state_ensembles_overall = np.array(state_ensembles_overall)
 
 # ------------------------------------------------------------------
 # ----------------------+ Plots the results +----------------------#
-
-# Simulated iteration steps
-x_obs = np.arange(1, len(observations_id) + 1)
+x_obs = np.arange(1, len(observations_id) + 1) # Simulated iteration steps
 
 # -----------------------
 # CMRO_2 Stats for converged iterations
