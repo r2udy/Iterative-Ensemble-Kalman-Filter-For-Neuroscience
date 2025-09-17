@@ -29,12 +29,11 @@ class Po2Analyzer:
         self.sigma = 2.0  # for Gaussian smoothing
         self.smooth_data = gaussian_filter(self.pO2_value, sigma=self.sigma)
         self.rows, self.cols = self.pO2_value.shape
-        self.X, self.Y = X, Y
+        self.X, self.Y = np.meshgrid(np.arange(self.cols), np.arange(self.rows))
         self.p_vessel = np.max(self.pO2_value)
         
         self.Gx, self.Gy = np.gradient(self.pO2_value)
         self.Gmag = np.sqrt(self.Gx**2 + self.Gy**2)
-        self.distance_map = self._compute_distance_map()
     
     def find_circles(self, min_r: int = 1, angle_range1_deg=(0, 0), angle_range2_deg=None, win_size: int = 3):
         max_row, max_col = np.unravel_index(np.argmax(self.pO2_value), self.pO2_value.shape)
@@ -120,27 +119,7 @@ class Po2Analyzer:
             print("Warning: No valid circular segment found in the given angle range.")
             self.outer_circle = self.inner_circle = self.rin = self.rout = self.center = None
         
-        # self.rout = self._estimate_rout()
-
-    def _compute_distance_map(self):
-        self.idx_min = np.argmin(self.smooth_data.flatten())
-
-        # Find the indices of the 5 minimum values in the flattened smooth_data array
-        flat_smooth_data = self.pO2_value.flatten()
-        idx_min_flat = np.argpartition(flat_smooth_data, 5)[:5]
-        idx_min = np.unravel_index(idx_min_flat, self.smooth_data.shape)
-
-        # Find the index of the maximum value in pO2_value
-        imax, jmax = np.unravel_index(np.argmax(self.pO2_value), self.pO2_value.shape)
-
-        distance_map = np.zeros_like(self.pO2_value)
-        for row in range(self.pO2_value.shape[0]):
-            for col in range(self.pO2_value.shape[1]):
-                r_ = np.sqrt((row - imax)**2 + (col - jmax)**2)
-                distance_map[row, col] = self.pixel_size * r_
-        return distance_map
-
-    def find_circles(self):
+    def find_circles_coordinates(self):
         """
         In radial mode: 
         - Inner circle = circle with maximum average pO2 along circumference.

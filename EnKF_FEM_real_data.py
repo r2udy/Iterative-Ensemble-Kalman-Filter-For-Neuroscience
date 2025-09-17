@@ -41,7 +41,7 @@ D = 4.0e3
 alpha = 1.39e-15
 cmro2_by_M = (60 * D * alpha * 1e12)
 
-cmro2_lower, cmro2_upper = 1.0, 7.0
+cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
 M_var = cmro2_var / cmro2_by_M**2 / 5
 M_std = np.sqrt(cmro2_var) / cmro2_by_M # model uncertainty
@@ -104,7 +104,7 @@ for i, entry in enumerate(uniform_dataset):
 
     angles_1 = entry[1]
     angles_2 = entry[2]
-
+ 
     min_radius = entry[3][0]
     print(f"*** Converged on data point *** \narteriole:{art_id}\ndepth_id:{dth_id}")
 
@@ -260,7 +260,7 @@ for i in range(numBoxes):
     P.plot(x, y, 'r.', alpha=0.2)
 P.xlabel('$PO_{2}$ Map ID')
 P.ylabel('Absolute Partial Pressure Error')
-P.title('Absolute Errors Rpartition - EnKF')
+P.title('Absolute Errors Repartition - EnKF')
 P.grid(True)
 P.show()
 
