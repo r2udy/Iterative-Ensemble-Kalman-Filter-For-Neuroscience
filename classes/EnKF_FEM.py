@@ -119,6 +119,58 @@ def build_obs_covariance(
 
     return C
 
+def build_obs_covariance_radial(
+    grid_size=20,
+    origin=(10, 10),
+    obs_var_low=1.0**2,
+    obs_var_high=5.0**2,
+    mode="linear"  # can be "linear" or "exponential"
+):
+    """
+    Build a diagonal covariance matrix (grid_size^2 x grid_size^2).
+    Variance increases from center to border.
+    
+    Args:
+        grid_size: side length of the grid (e.g. 20).
+        origin: (x0, y0) center of the vessel.
+        obs_var_low: variance at the center.
+        obs_var_high: variance at the edge.
+        mode: 'linear' or 'exponential' scaling.
+    
+    Returns:
+        matrix_diag: diagonal covariance matrix (grid_size^2, grid_size^2).
+    """
+    matrix_size = grid_size * grid_size
+    matrix_diag = np.zeros((matrix_size, matrix_size))
+
+    # Max distance = distance from center to farthest corner
+    max_radius = math.hypot(grid_size - origin[0], grid_size - origin[1])
+
+    # Flatten the 2D grid into list of cells
+    grid_cells = [(x, y) for y in range(grid_size) for x in range(grid_size)]
+
+    for k, (x, y) in enumerate(grid_cells):
+        dx, dy = x - origin[0], y - origin[1]
+        r = math.hypot(dx, dy)  # radial distance from center
+
+        # Normalize distance [0, 1]
+        r_norm = r / max_radius
+
+        if mode == "linear":
+            weight = r_norm
+        elif mode == "exponential":
+            weight = 1 - np.exp(-3 * r_norm)  # saturates smoothly near 1
+        else:
+            raise ValueError("mode must be 'linear' or 'exponential'")
+
+        # Variance interpolated between low and high
+        variance = obs_var_low + (obs_var_high - obs_var_low) * weight
+
+        # Put it on diagonal
+        matrix_diag[k, k] = variance
+
+    return matrix_diag
+
 class EnKF:
     def __init__(self,
                  state_dim: int,
@@ -215,7 +267,7 @@ class EnKF:
         # Extract parameters from state
         cmro2   = state * self.cmro2_by_M
         Pves    = np.max(observation)
-        Rves    = 10. # analyzer.rin
+        Rves    = analyzer.rin
         R0      = analyzer.rout
         center = analyzer.center_ij
 
@@ -251,7 +303,6 @@ class EnKF:
         x = np.array(domain_coordinate[:, 0])
         y = np.array(domain_coordinate[:, 1])
         
-        x_min, x_max = np.min(x), np.max(x)
         y_min, y_max = np.min(y), np.max(y)
         
         # Create observation grid points
