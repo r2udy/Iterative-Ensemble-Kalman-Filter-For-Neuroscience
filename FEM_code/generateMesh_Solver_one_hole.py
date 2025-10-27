@@ -381,7 +381,6 @@ class SolverParameters:
         self.R0 = R0
 
 
-
 def main():
     # Initialize MPI
     comm = MPI.COMM_WORLD

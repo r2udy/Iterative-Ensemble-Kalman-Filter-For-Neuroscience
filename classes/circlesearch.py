@@ -61,14 +61,14 @@ class Po2Analyzer:
 
         if np.abs(imax - jmax) > 3:
             print("Warning: Center is not near the diagonal!")
-            fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-            c = ax.pcolormesh(self.X, self.Y, self.pO2_value, shading='auto', cmap='jet')
-            fig.colorbar(c, label='pO₂')
-            ax.set_title(f"Radial pO₂ Map of the ensemble member | Center at ({self.X[jmax, imax]:.1f}, {self.Y[jmax, imax]:.1f})")
-            ax.set_xlabel('X (pixels)')
-            ax.set_ylabel('Y (pixels)')
-            ax.axis('equal')
-            plt.show()
+            # fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+            # c = ax.pcolormesh(self.X, self.Y, self.pO2_value, shading='auto', cmap='jet')
+            # fig.colorbar(c, label='pO₂')
+            # ax.set_title(f"Radial pO₂ Map of the ensemble member | Center at ({self.X[jmax, imax]:.1f}, {self.Y[jmax, imax]:.1f})")
+            # ax.set_xlabel('X (pixels)')
+            # ax.set_ylabel('Y (pixels)')
+            # ax.axis('equal')
+            # plt.show()
         cx, cy = self.X[jmax, imax], self.Y[jmax, imax]
         self.center = (cx, cy)
         self.center_ij = (imax, jmax)

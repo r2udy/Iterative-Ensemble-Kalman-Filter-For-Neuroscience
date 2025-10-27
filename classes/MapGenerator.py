@@ -21,9 +21,11 @@ class MapGenerator:
                  Rves: float,
                  R0: float,
                  Rt: float,
+                 X: np.ndarray = None,
+                 Y: np.ndarray = None,
                  model: str = 'KE',
                  pixel_size: float = 10.0,
-                 center: Tuple[int, int] = (10, 11),
+                 center: Tuple[int, int] = (0, 0),
                  grid_size: Tuple[int, int] = (20, 20)):
         
         """
@@ -50,7 +52,6 @@ class MapGenerator:
         
         # Vascular parameters
         self.cols, self.rows = 20, 20
-        self.X, self.Y = np.meshgrid(np.arange(self.cols), np.arange(self.rows))
         self.cmro2 = cmro2
         self.M = self.cmro2 / self.cmro2_by_M
         self.pvessel = pvessel
@@ -62,7 +63,7 @@ class MapGenerator:
         # Grid configuration
         self.center = np.array(center)
         self.cols, self.rows = grid_size
-        self.X, self.Y = np.meshgrid(np.arange(self.cols), np.arange(self.rows))
+        self.X, self.Y = X, Y
         
         # Generate pressure map
         self.model = model
@@ -143,18 +144,6 @@ class MapGenerator:
             result[tissue] = term_Rt_r(r_masked)
 
         return result
-    
-    # def generate_map(self) -> np.ndarray:
-    #     # Center the outer circle in the middle of the pixel cells
-    #     dx = (self.X - (2*self.center[0] - 1) / 2) * self.pixel_size
-    #     dy = (self.Y - (2*self.center[1] - 1) / 2) * self.pixel_size
-    #     r = np.sqrt(dx**2 + dy**2)
-    #     self.r_values = r
-        
-    #     if self.model == 'KE':
-    #         return self._partial_pressure_KE(r)
-    #     elif self.model == 'ODACITI':
-    #         return self._partial_pressure(r)
         
     def generate_map(self) -> np.ndarray:
 
@@ -170,7 +159,7 @@ class MapGenerator:
         
         # Define holes
         holes = [
-            HoleGeometry(center=(0, 0, 0), radius_ves=self.Rves, radius_0=self.R0, marker=3),
+            HoleGeometry(center=(*self.center, 0), radius_ves=self.Rves, radius_0=self.R0, marker=3),
             ]
         
         # Generate mesh
@@ -188,12 +177,10 @@ class MapGenerator:
         # -------------------------
         # Interpolate to observation grid
         # -------------------------
-        x_min, x_max = np.min(x), np.max(x)
-        y_min, y_max = np.min(y), np.max(y)
         
         # Create observation grid points
-        x_obs = np.linspace(x_min, x_max, self.cols)
-        y_obs = np.linspace(y_min, y_max, self.cols)
+        x_obs = self.X[0] - self.X[0].mean()
+        y_obs = self.Y[:,0] - self.Y[:,0].mean()
         
         # Create simulation grid
         x_idx_domain = solver.interpolation_grid(x, x_obs)

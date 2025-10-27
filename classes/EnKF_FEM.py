@@ -219,26 +219,26 @@ class EnKF:
         -----------
         a : np.ndarray, shape (state_dim,)
             Mean of the initial state distribution (or lower bound for uniform distrib)
-        b: np.ndarray, shape (state_dim,)
+        b : np.ndarray, shape (state_dim,)
             Covariance of the initial state distribution (or upper bound for uniform distrib)
         """
         # ratio M
-        self.ensemble[0] = self.rng.uniform(
-            a[0], b[0], size=(1, self.n_ensembles)
-            )  # Shape: (state_dim, n_ensembles)
+        assert a.shape == (self.state_dim,) and b.shape == (self.state_dim,)
+        for k in range(self.state_dim):
+            self.ensemble[k, :] = self.rng.uniform(
+                a[k], b[k], size=(1, self.n_ensembles)
+                )  # Shape: (state_dim, n_ensembles)
 
     def set_process_noise(self, B: np.ndarray):
         """Set the background noise covariance matrix"""
         self.B = B
-    
+
     def set_observation_noise(self, R: np.ndarray):
         """Set the observation noise covariance matrix"""
         self.R = R
     
-
     def observation_operator(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray, state: np.ndarray):
         """
-
         Parameters
         ----------
         observation: np.ndarray, shape (obs_dim,)
@@ -265,11 +265,11 @@ class EnKF:
         analyzer.find_circles()
         
         # Extract parameters from state
-        cmro2   = state * self.cmro2_by_M
-        Pves    = np.max(observation)
-        Rves    = analyzer.rin
-        R0      = analyzer.rout
-        center = analyzer.center_ij
+        cmro2   = float(state[0]) * self.cmro2_by_M
+        Pves    = 80.0 # analyzer.p_vessel
+        Rves    = 11.0
+        R0      = 100.0
+        center = (0.0, 0.0)
 
         # Generate mesh with dynamic radii
         # Initialize MPI
@@ -279,7 +279,12 @@ class EnKF:
         solver = DiffusionSolver(comm)
 
         # Create solver parameters
-        params = SolverParameters(filename="square_one_hole", cmro2=cmro2, Pves=Pves, Rves=Rves, R0=R0)
+        params = SolverParameters(filename="square_one_hole", 
+                                  cmro2=cmro2, 
+                                  Pves=Pves, 
+                                  Rves=Rves, 
+                                  R0=R0
+                                )
         
         # Define holes
         holes = [
@@ -293,9 +298,6 @@ class EnKF:
         solver.setup_problem(params, holes)
         solver.solve()
 
-        # Save results
-        solver.save_results(params.filename)
-
         # -------------------------
         # Interpolate to observation grid
         uh = solver.uh.x.array
@@ -303,11 +305,9 @@ class EnKF:
         x = np.array(domain_coordinate[:, 0])
         y = np.array(domain_coordinate[:, 1])
         
-        y_min, y_max = np.min(y), np.max(y)
-        
         # Create observation grid points
-        x_obs = X[0]
-        y_obs = np.linspace(y_min, y_max, n)
+        x_obs = X[0] - X[0].mean()
+        y_obs = Y[:,0] - Y[:,0].mean()
         
         # Create simulation grid
         x_idx_domain = solver.interpolation_grid(x, x_obs)
@@ -318,9 +318,9 @@ class EnKF:
         points = np.column_stack((X_domain.ravel(), Y_domain.ravel()))
 
         # Evaluate FEM solution at observation points
-        obs_model = griddata((x, y), uh, points, method='linear') # Interpolate z values at the grid points
+        obs_model = griddata((x, y), uh, points, method='linear').reshape((n, n), order='F') # Interpolate z values at the grid points
 
-        return obs_model
+        return obs_model.flatten()
         
         
     def predict(self):
@@ -334,10 +334,9 @@ class EnKF:
             self.ensemble[:, i] = self.dynamics_model(self.ensemble[:, i])
             
             # Add background noise
-            self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.B)
+            self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.B)        
 
     def update(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray):
-        
         """
         Update step: adjust the ensemble based on observations
         
@@ -353,10 +352,9 @@ class EnKF:
         obs_model_ensembles = np.zeros_like(obs_ensemble)
         
         # Generate perturbed observations
-        for i in range(self.n_ensembles):
-            obs_ensemble[:, i] = observation + self.rng.multivariate_normal(
-                np.zeros(self.obs_dim), self.R
-            )
+        assert self.R.shape == (self.obs_dim, self.obs_dim)
+        obs_perturbation = self.rng.multivariate_normal(np.zeros(self.obs_dim), self.R, size=self.n_ensembles).T
+        obs_ensemble = observation[:, np.newaxis] + obs_perturbation
         
         # Filter out observation parameter outside the annular 
         for i in range(self.n_ensembles):
