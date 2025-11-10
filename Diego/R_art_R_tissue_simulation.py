@@ -32,7 +32,7 @@ R_ART_MIN_PEAK      = 0.33            # min required height of peak in -dpO2/dr
 R_TISSUE_D2_THRESH  = 1.7e-2                   # |second derivative| must be <= this
 TOLERANCE_FRAC = 0.1                            # 10% radial tolerance for half-sector containment
 R_ART_CONTAIN_TOL_FRAC = 0.1                   # 10% radial tolerance for R_art containment
-SHOW_DETECTION_PLOTS = False                   # Toggle diagnostic plots for R_art and R_tissue detection
+SHOW_DETECTION_PLOTS = True                   # Toggle diagnostic plots for R_art and R_tissue detection
 
 # ----------------------------
 # Krogh–Erlang 2D Model Function

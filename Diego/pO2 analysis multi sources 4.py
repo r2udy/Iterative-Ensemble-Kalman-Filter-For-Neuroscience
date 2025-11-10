@@ -39,7 +39,7 @@ SHOW_DETECTION_PLOTS = False            # Toggle diagnostic plots for R_art and 
 file_path = '/Users/diegokirsch/Downloads/dataset.pkl'
 
 # invalid records: 6
-row_to_plot = 4  # record to analyze
+row_to_plot = 57  # record to analyze
 
 print(f"Reading DataFrame from '{file_path}'...")
 try:
