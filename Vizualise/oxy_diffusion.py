@@ -10,55 +10,8 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 
 # Import the data
-data_two_holes_axis = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/FEM_code/SavedFiles/Results/square_two_holes_coordinates.npy")
-data_two_holes = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/FEM_code/SavedFiles/Results/square_two_holes_solution.npy")
-
-# data_one_hole_axis = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/FEM_code/SavedFiles/Results/square_one_hole_MM_coordinates.npy")
-# data_one_hole = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/FEM_code/SavedFiles/Results/square_one_hole_MM_solution.npy")
-
-data_one_hole_axis = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/square_one_hole_MM_coordinates.npy")
-data_one_hole = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/square_one_hole_MM_solution.npy")
-
-# Constant
-R_ves = 20
-R_t = 150
-D = 4.0e3 #  m2 s−1
-alpha = 1.39*1e-15 #  μM mmHg−1
-CMRO2 =  1.80 / (60 * 1e12) # μmol μm−3 s−1
-rO2 = CMRO2 / alpha
-M = rO2 / D # mmHg μm−2
-P_ves = 99.42 # mmHg
-
-
-# Assign the data
-z = data_two_holes
-x = data_two_holes_axis[:, 0]
-y = data_two_holes_axis[:, 1]
-
-fig, ax = plt.subplots(figsize=(6, 5))
-sc = ax.scatter(x, y, c=z, cmap='viridis')
-ax.set_xlabel('x - axis')
-ax.set_ylabel('y - axis')
-ax.set_title("PO2 fit as a function of the radial distance from the penetrating arteriole")
-plt.colorbar(sc, ax=ax, label='Color scale: Po2 (mmHg)')
-plt.tight_layout()
-plt.show()
-
-# 3D plot
-fig = plt.figure(figsize=(10, 7))
-ax = fig.add_subplot(111, projection='3d')
-
-sc = ax.scatter(x, y, z, c=z, cmap='viridis')
-ax.set_xlabel('x - axis')
-ax.set_ylabel('y - axis')
-ax.set_zlabel('z - axis')
-ax.set_title("3D PO2 fit as a function of the radial distance from the penetrating arteriole")
-plt.colorbar(sc, ax=ax, label='Color scale: Po2 (mmHg)')
-plt.tight_layout()
-plt.show()
-
-
-
+data_one_hole_axis = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/square_one_hole_id0_test_coordinates.npy")
+data_one_hole = np.load("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/square_one_hole_id0_test_solution.npy")
 
 # Assign the data
 z = data_one_hole
@@ -113,9 +66,9 @@ y_domain = y[y_idx]
 X_domain, Y_domain = np.meshgrid(x_domain, y_domain)
 points = np.column_stack((X_domain.ravel(), Y_domain.ravel()))
 
-# Interpolate z values at the grid points
-z_grid = griddata((x, y), z, points, method='linear').reshape(20, 20)
+# # Interpolate z values at the grid points
+# z_grid = griddata((x, y), z, points, method='linear').reshape(20, 20)
 
-plt.figure()
-plt.scatter(X_domain, Y_domain, z_grid, c=z_grid)
-plt.show()
+# plt.figure()
+# plt.scatter(X_domain, Y_domain, z_grid, c=z_grid)
+# plt.show()

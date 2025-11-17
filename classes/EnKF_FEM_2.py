@@ -5,25 +5,20 @@ Created on Thurs Jul 24 09:39:00 2025
 @author: ruudy
 """
 
+import sys
+import os
+import math
 import numpy as np
-import matplotlib.pyplot as plt
-import ufl
-import gmsh
-import basix
-import dolfinx.plot
-import pyvista
-from Core.Mesh import plot_mesh_with_physical_groups, create_mesh
-from dolfinx import fem, io, mesh, log
-from dolfinx.io import XDMFFile, gmshio
-from dolfinx.fem.petsc import NonlinearProblem
-from dolfinx.nls.petsc import NewtonSolver
+from scipy.stats import truncnorm
+import concurrent.futures
 from mpi4py import MPI
-from petsc4py.PETSc import ScalarType
 from typing import Callable, Optional
 from circlesearch import Po2Analyzer
-from multiprocessing import Pool
 from scipy.interpolate import griddata
-from scipy.stats import truncnorm
+from Po2Dataset import get_cells_by_angle
+
+py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/"
+sys.path.append(os.path.abspath(py_file_location))
 from FEM_code.generateMesh_Solver_one_hole import HoleGeometry, DiffusionSolver, SolverParameters
 
 class EnKF:
@@ -60,8 +55,10 @@ class EnKF:
         self.ensemble = np.zeros((state_dim, n_ensembles))
         
         # Covariance matrices
-        self.Q = np.eye(state_dim) # Background noise covariance
-        self.R = np.eye(obs_dim) # Observation noise covariancemu
+        self.B = np.eye(state_dim) # Background noise covariance
+        self.R = np.eye(obs_dim) # Observation noise covariance
+
+        self.length_scale = 1.0 # Length scale for the update step
         
         
     def initialize_ensemble(self, a: np.ndarray, b: np.ndarray):
@@ -76,36 +73,21 @@ class EnKF:
             Covariance of the initial state distribution (or upper bound for uniform distrib)
         """
         # ratio M
-        M_mean, M_std = a[0], a[0]
-        lower_bound = 0.1 / self.cmro2_by_M
-        upper_bound = np.inf  # No upper bound
-        # Calculate the bounds for the truncated normal distribution
-        a_trunc, b_trunc = (lower_bound - M_mean) / M_std, (upper_bound - M_mean) / M_std
-        self.ensemble[0] = truncnorm.rvs(
-            a_trunc, b_trunc, loc=M_mean, scale=M_std, size=(1, self.n_ensembles), random_state=self.rng
-        )  # Shape: (state_dim, n_ensembles)
+        for k in range(self.state_dim):
+            self.ensemble[k, :] = self.rng.uniform(
+                a[k], b[k], size=(1, self.n_ensembles)
+                )  # Shape: (state_dim, n_ensembles)
 
-        # R0
-        r0_mean, r0_std = a[1], b[1]
-        lower_bound = 0
-        upper_bound = np.inf  # No upper bound
-        # Calculate the bounds for the truncated normal distribution
-        a_trunc, b_trunc = (lower_bound - r0_mean) / r0_std, (upper_bound - r0_mean) / r0_std
-        self.ensemble[1] = truncnorm.rvs(
-            a_trunc, b_trunc, loc=r0_mean, scale=r0_std, size=(1, self.n_ensembles), random_state=self.rng
-        )  # Shape: (state_dim, n_ensembles)
-
-    def set_process_noise(self, Q: np.ndarray):
+    def set_process_noise(self, B: np.ndarray):
         """Set the background noise covariance matrix"""
-        self.Q = Q
+        self.B = B
     
     def set_observation_noise(self, R: np.ndarray):
         """Set the observation noise covariance matrix"""
         self.R = R
 
-    def observation_operator(self, observation: np.ndarray, state: np.ndarray):
+    def observation_operator(self, state: np.ndarray, X: np.ndarray, Y: np.ndarray, observation: np.ndarray) -> np.ndarray:
         """
-
         Parameters
         ----------
         observation: np.ndarray, shape (obs_dim,)
@@ -118,7 +100,6 @@ class EnKF:
             Anylitical Map of partial oxygen pressure
         annnular_idx: np.ndarray, shape (obs_dim,)
             Index of the 
-            
         """
         
         assert observation.shape == (self.obs_dim,)
@@ -128,14 +109,15 @@ class EnKF:
         n = 20 # observation dimension
         observation.mean()
         observation_array = np.reshape(observation, (n, n)) # ensemble member observation (n by n)
-        analyzer = Po2Analyzer(observation_array)
+        analyzer = Po2Analyzer(observation_array, X, Y)
         analyzer.find_circles()
         
         # Extract parameters from state
         cmro2   = state[0] * self.cmro2_by_M
         Pves    = np.max(observation)
-        Rves    = analyzer.rin
+        Rves    = 11.
         R0      = state[1]
+        center  = (0.0, 0.0)
         marker = 3
 
         # Generate mesh with dynamic radii
@@ -146,11 +128,15 @@ class EnKF:
         solver = DiffusionSolver(comm)
 
         # Create solver parameters
-        params = SolverParameters(filename="square_one_hole", cmro2=cmro2, Pves=Pves, Rves=Rves, R0=R0)
-        
+        params = SolverParameters(filename="square_one_hole", 
+                                  cmro2=cmro2, 
+                                  Pves=Pves, 
+                                  Rves=Rves, 
+                                  R0=R0
+                                )
         # Define holes
         holes = [
-            HoleGeometry(center=(0, 0, 0), radius_ves=params.Rves, radius_0=params.R0, marker=3),
+            HoleGeometry(center=(*center, 0), radius_ves=params.Rves, radius_0=params.R0, marker=3),
             ]
         
         # Generate mesh
@@ -160,9 +146,6 @@ class EnKF:
         solver.setup_problem(params, holes)
         solver.solve()
 
-        # Save results
-        solver.save_results(params.filename)
-
         # -------------------------
         # Interpolate to observation grid
         uh = solver.uh.x.array
@@ -170,12 +153,9 @@ class EnKF:
         x = np.array(domain_coordinate[:, 0])
         y = np.array(domain_coordinate[:, 1])
         
-        x_min, x_max = np.min(x), np.max(x)
-        y_min, y_max = np.min(y), np.max(y)
-        
         # Create observation grid points
-        x_obs = np.linspace(x_min, x_max, n)
-        y_obs = np.linspace(y_min, y_max, n)
+        x_obs = X[0] - X[0].mean()
+        y_obs = Y[:,0] - Y[:,0].mean()
         
         # Create simulation grid
         x_idx_domain = solver.interpolation_grid(x, x_obs)
@@ -186,9 +166,9 @@ class EnKF:
         points = np.column_stack((X_domain.ravel(), Y_domain.ravel()))
 
         # Evaluate FEM solution at observation points
-        obs_model = griddata((x, y), uh, points, method='linear') # Interpolate z values at the grid points
+        obs_model = griddata((x, y), uh, points, method='linear').reshape((n, n), order='F') # Interpolate z values at the grid points
         
-        return obs_model
+        return obs_model.flatten()
         
         
     def predict(self):
@@ -202,16 +182,9 @@ class EnKF:
             self.ensemble[:, i] = self.dynamics_model(self.ensemble[:, i])
             
             # Add background noise using truncated normal distribution
-            lower_bound = 0
-            upper_bound = np.inf  # No upper bound
-            for j in range(self.state_dim):
-                mean, std = 0, np.sqrt(self.Q[j, j])  # Assuming Q is a diagonal covariance matrix
-                a_trunc, b_trunc = (lower_bound - mean) / std, (upper_bound - mean) / std
-                noise = truncnorm.rvs(a_trunc, b_trunc, loc=mean, scale=std, random_state=self.rng)
-                self.ensemble[j, i] += noise
+            self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.B)
 
-    def update(self, observation: np.ndarray, angle_range1_deg: tuple = (0, 0), angle_range2_deg: tuple = (0, 0)):
-        
+    def update(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray):
         """
         Update step: adjust the ensemble based on observations
         
@@ -219,26 +192,41 @@ class EnKF:
         -----------
         observation: np.ndarray, shape (obs_dim,)
             The observed measurement
-        angle_range1_deg: First angle range in degrees (min, max)
-        angle_range2_deg: Second angle range in degrees (min, max)
         """
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        size = comm.Get_size()
+    
         # Generate pertubated observations according to a Gaussian distributions
         obs_ensemble = np.zeros((self.obs_dim, self.n_ensembles))
         obs_model_ensembles = np.zeros_like(obs_ensemble)
         
         # Generate perturbed observations
-        for i in range(self.n_ensembles):
-            obs_ensemble[:, i] = observation + self.rng.multivariate_normal(
-                np.zeros(self.obs_dim), self.R
-            )
+        assert self.R.shape == (self.obs_dim, self.obs_dim)
+        obs_perturbation = self.rng.multivariate_normal(np.zeros(self.obs_dim), self.R, size=self.n_ensembles).T
+        obs_ensemble = observation[:, np.newaxis] + obs_perturbation
         
-        # Filter out observation parameter outside the annular 
-        for i in range(self.n_ensembles):
-            # ensemble member state parameter
-            state = self.ensemble[:, i]
-            obs_model_ensembles[:, i] = self.observation_operator(obs_ensemble[:, i], state)
+        # Split ensembles across ranks
+        local_indices = np.array_split(np.arange(self.n_ensembles), size)[rank]
+        local_results = []
 
-        
+        for i in local_indices:
+            state = self.ensemble[:, i]
+            result = self.observation_operator(state, X, Y, obs_ensemble[:, i])
+            local_results.append(result)
+
+        # Gather results from all ranks
+        gathered_results = comm.allgather(local_results)
+        gathered_results = [item for sublist in gathered_results for item in sublist]
+        obs_model_ensembles = np.array(gathered_results).T  # shape (obs_dim, n_ensembles)
+
+
+        # for i in range(self.n_ensembles):
+        #     # ensemble member state parameter
+        #     state = self.ensemble[:, i]
+        #     obs_model_ensembles[:, i] = self.observation_operator(state, X, Y, obs_ensemble[:, i])
+
+
         # 1. Compute ensemble means and deviations
         state_mean = np.mean(self.ensemble, axis=1)
         obs_mean = np.mean(obs_model_ensembles, axis=1)
@@ -247,13 +235,14 @@ class EnKF:
         obs_deviation = obs_model_ensembles - obs_mean[:, np.newaxis]
         
         # 2. Compute Kalman Gain
-        A_BHT = (state_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
-        A_HBHT = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
-        K = A_BHT @ np.linalg.inv(A_HBHT + self.R)
+        A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
+        self.A_BHT = (state_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
+        self.A_HBHT = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
+        self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + self.R)
         
         # 3. Update ensemble: innovation = observation - obs_model(ensemble)
-        innovation = obs_ensemble - obs_model_ensembles
-        self.ensemble += K @ innovation
+        self.innovation = obs_ensemble - obs_model_ensembles
+        self.ensemble += self.length_scale * self.K @ self.innovation
         
     def get_state_estimate(self):
         """
@@ -280,4 +269,26 @@ class EnKF:
             The ensemble members
         """
         return self.ensemble
+    
+    def get_Kalman_gain(self):
+        """
+        Get the current Kalman Gain
+        
+        Returns:
+        --------
+        ensemble : np.ndarray, shape (state_dim, n_ensembles)
+            The ensemble members
+        """
+        return self.K
+    
+    def get_innovation(self):
+        """
+        Get the current innovation
+        
+        Returns:
+        --------
+        innovation : np.ndarray, shape (obs_dim, n_ensembles)
+            The innovation for each ensemble member
+        """
+        return self.innovation
         

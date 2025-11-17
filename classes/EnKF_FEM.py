@@ -237,7 +237,7 @@ class EnKF:
         """Set the observation noise covariance matrix"""
         self.R = R
     
-    def observation_operator(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray, state: np.ndarray):
+    def observation_operator(self, state: np.ndarray, X: np.ndarray, Y: np.ndarray, observation: np.ndarray) -> np.ndarray:
         """
         Parameters
         ----------
@@ -251,7 +251,6 @@ class EnKF:
             Anylitical Map of partial oxygen pressure
         annnular_idx: np.ndarray, shape (obs_dim,)
             Index of the 
-            
         """
         
         assert observation.shape == (self.obs_dim,)
@@ -266,9 +265,9 @@ class EnKF:
         
         # Extract parameters from state
         cmro2   = float(state[0]) * self.cmro2_by_M
-        Pves    = 80.0 # analyzer.p_vessel
+        Pves    = observation.max()
         Rves    = 11.0
-        R0      = 100.0
+        R0      = analyzer.rout
         center = (0.0, 0.0)
 
         # Generate mesh with dynamic radii
@@ -333,7 +332,7 @@ class EnKF:
             # Propagate state through dynamics model
             self.ensemble[:, i] = self.dynamics_model(self.ensemble[:, i])
             
-            # Add background noise
+            # Add background noise to each ensemble member
             self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.B)        
 
     def update(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray):
@@ -344,8 +343,6 @@ class EnKF:
         -----------
         observation: np.ndarray, shape (obs_dim,)
             The observed measurement
-        angle_range1_deg: First angle range in degrees (min, max)
-        angle_range2_deg: Second angle range in degrees (min, max)
         """
         # Generate pertubated observations according to a Gaussian distributions
         obs_ensemble = np.zeros((self.obs_dim, self.n_ensembles))
@@ -360,9 +357,7 @@ class EnKF:
         for i in range(self.n_ensembles):
             # ensemble member state parameter
             state = self.ensemble[:, i]
-            
-            obs_model = self.observation_operator(obs_ensemble[:, i], X, Y, state)
-            obs_model_ensembles[:, i] = obs_model
+            obs_model_ensembles[:, i] = self.observation_operator(state, X, Y, obs_ensemble[:, i])
 
         
         # 1. Compute ensemble means and deviations
@@ -374,9 +369,9 @@ class EnKF:
         
         # 2. Compute Kalman Gain
         A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
-        A_BHT = (state_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
-        A_HBHT = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
-        self.K = A_BHT @ np.linalg.inv(A_HBHT + self.R)
+        self.A_BHT = (state_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
+        self.A_HBHT = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
+        self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + self.R)
         
         # 3. Update ensemble: innovation = observation - obs_model(ensemble)
         self.innovation = obs_ensemble - obs_model_ensembles

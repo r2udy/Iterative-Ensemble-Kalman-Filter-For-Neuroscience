@@ -35,7 +35,7 @@ class DiffusionSolver:
         self.alpha = 1.39e-15
         self.cmro2_by_M = (60 * self.D * self.alpha * 1e12)
     
-    def generate_mesh(self, holes, domain_size=200.0, element_size=5.0, refined_size=2.0):
+    def generate_mesh(self, holes, domain_size=400.0, element_size=5.0, refined_size=2.0):
         """Generate mesh with refined areas around holes"""
         gmsh.initialize()
         model = gmsh.model()
@@ -197,7 +197,7 @@ class DiffusionSolver:
                 self.M_func.x.array[hole_dofs] = params.__getattribute__(f'M')
         
         # Boundary conditions
-        self.setup_dirichlet_bcs()
+        self.setup_dirichlet_bcs(holes)
         
         # Define circular Neumann boundaries
         self.setup_neumann_bcs(holes)
@@ -215,33 +215,36 @@ class DiffusionSolver:
                 for hole in holes
         )
         
-    def setup_dirichlet_bcs(self):
+    def setup_dirichlet_bcs(self, holes):
         """Configure Dirichlet boundary conditions"""
         # Create boundary functions
         uD = fem.Function(self.V)
         
-        # Boundary expressions
-        def uD_expr(x):
-            r = np.sqrt(x[0]**2 + x[1]**2)
-            r = np.maximum(r, 1e-8)
-            return self.params.Pves + (self.params.M / 4) * (
-                (r**2 - self.params.Rves**2) - 2 * self.params.R0**2 * np.log(r / self.params.Rves))
+        for hole in holes:
+            # Boundary expressions
+            def uD_expr(x):
+                dx = x[0] - hole.center[0]
+                dy = x[1] - hole.center[1]
+                r = np.sqrt(dx**2 + dy**2)
+                r = np.maximum(r, 1e-8)
+                return self.params.Pves + (self.params.M / 4) * (
+                    (r**2 - self.params.Rves**2) - 2 * self.params.R0**2 * np.log(r / self.params.Rves))
+                
+            uD.interpolate(uD_expr)
             
-        uD.interpolate(uD_expr)
-        
-        # Locate boundary dofs
-        facets = np.where(self.facet_tags.values == self.params.marker)[0]
-        
-        dofs = fem.locate_dofs_topological(
-            self.V, self.domain.topology.dim-1, 
-            self.facet_tags.indices[facets]
-        )
-        
-        # Create BCs
-        self.bcs = [
-            fem.dirichletbc(uD, dofs),
-        ]
-        
+            # Locate boundary dofs
+            facets = np.where(self.facet_tags.values == self.params.marker)[0]
+            
+            dofs = fem.locate_dofs_topological(
+                self.V, self.domain.topology.dim-1, 
+                self.facet_tags.indices[facets]
+            )
+            
+            # Create BCs
+            self.bcs = [
+                fem.dirichletbc(uD, dofs),
+            ]
+            
     def setup_neumann_bcs(self, holes):
         """Set up no-flux boundary conditions on circles around holes"""
         domain = self.domain
@@ -386,14 +389,14 @@ def main():
     comm = MPI.COMM_WORLD
     
     # Create solver parameters
-    params = SolverParameters(filename="square_one_hole_id0", cmro2=-1, Pves=75., Rves=10., R0=80.)
+    params = SolverParameters(filename="square_one_hole_id0_test", cmro2=2., Pves=80., Rves=10., R0=100.)
     
     # Create solver instance
     solver = DiffusionSolver(comm)
     
     # Define holes
     holes = [
-        HoleGeometry(center=(0, 0, 0), radius_ves=params.Rves, radius_0=params.R0, marker=params.marker),
+        HoleGeometry(center=(-50, -50, 0), radius_ves=params.Rves, radius_0=params.R0, marker=params.marker),
         ]
     
     # Generate mesh

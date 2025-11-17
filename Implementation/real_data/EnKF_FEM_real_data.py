@@ -50,7 +50,7 @@ obs_var_low = 1.**2 # measurement uncertainty
 seed = np.random.seed(1)
 state_dim = 1
 obs_dim = 400
-n_ensembles = 100
+n_ensembles = 10
 
 # Initialize the ensemble
 a = np.array([cmro2_lower / cmro2_by_M])
@@ -131,7 +131,9 @@ for i, entry in enumerate(uniform_dataset):
     obs_var_high = obs_var_high,
     obs_var_low = obs_var_low,
     mode='exponential'
-)
+    )
+    # R = 15. * np.eye(obs_dim) # Observation covariance matrix
+
     enkf.set_observation_noise(R)
 
     # --- Quick visualization: diagonal (variance) map ---
@@ -193,7 +195,9 @@ for i, entry in enumerate(uniform_dataset):
                         pvessel=p_vessel, 
                         Rves=Rves, 
                         R0=R0, 
-                        Rt=R0)
+                        Rt=R0,
+                        X=X,
+                        Y=Y)
     error_enkf_relative = np.abs(obs - generator_enkf.pO2_array.flatten()) * 100 / np.abs(obs) 
     error_enkf_absolute = np.abs(obs - generator_enkf.pO2_array.flatten())
 

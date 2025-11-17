@@ -14,7 +14,7 @@ obs_var = 20**2
 Gaussian White noise: sigma=2
 
 # Covariance matrix
-M_var = cmro2_var / cmro2_by_M**2 / 12
+M_var = cmro2_var / cmro2_by_M**2 = 4.0
 Q = np.array([[M_var]])         # Background covariance matrix
 R = obs_var * np.eye(obs_dim)   # Observation covariance matrixservation covariance matrix
 
@@ -25,4 +25,4 @@ R_0: 	True R_0=100.
 # Finite Element Method
 Library: FEniCS
 Mesh center: (0, 0, 0)
-Mesh size: 200
+Mesh size: 200x200

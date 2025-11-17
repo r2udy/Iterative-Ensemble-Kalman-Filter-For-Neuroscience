@@ -18,6 +18,7 @@ import pandas as pd
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
 from circlesearch import Po2Analyzer
+from MapGenerator import MapGenerator
 from Po2Dataset import load_data, get_cells_by_angle
 from EnKF_FEM import build_obs_covariance, build_obs_covariance_diagonal, build_obs_covariance_radial
 import pylab as P
@@ -74,8 +75,6 @@ print(f"r_in = {r_in:.2f}, r_out = {r_out:.2f}, center = {center}")
 
 
 
-
-
 # ---------------
 # Figure
 fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -120,8 +119,6 @@ ax.set_xlabel('X (pixels)')
 ax.set_ylabel('Y (pixels)')
 ax.axis('equal')
 plt.show()
-
-
 
 
 

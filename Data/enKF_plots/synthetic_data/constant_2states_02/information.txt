@@ -1,0 +1,37 @@
+github id:
+Model: FEM -> confounded radii R_0 and R_t
+State: [M, R0]
+n_ensembles = 50
+D = 4.0e3
+alpha = 1.39e-15
+
+# Initial guess: Uniform distribution for cmro2
+cmro2_lower, cmro2_upper = 1.0, 3.0
+
+# Initial guess: Uniform distribution for R0
+cmro2_lower, cmro2_upper = 20.0, 150.0
+
+# Synthetic Data
+2. umol /cm^3 /min x 10 times
+Gaussian White noise: sigma=2.
+
+No Alternative source.
+
+# Covariance matrix
+M_var = cmro2_var / cmro2_by_M**2 / 12 = 0.33
+R0_var = 5**2
+Q = np.array([[M_var,    0.0],
+              [0.0,   R0_var]])         # Background covariance matrix
+R = linear spatially varying (obs_var_high, obs_var_low)   # Observation covariance matrix
+
+Main source
+p_vessel: Max value of p_vessel ~ 80.
+R_art: 	True R_art=11.
+
+# Finite Element Method
+Library: FEniCS
+Mesh center: (0, 0, 0)
+Mesh size: 200x200
+
+# Coordinates
+X, Y = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))

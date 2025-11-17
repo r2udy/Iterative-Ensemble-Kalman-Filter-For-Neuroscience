@@ -182,6 +182,8 @@ class MapGenerator:
         x_obs = self.X[0] - self.X[0].mean()
         y_obs = self.Y[:,0] - self.Y[:,0].mean()
         
+        
+
         # Create simulation grid
         x_idx_domain = solver.interpolation_grid(x, x_obs)
         y_idx_domain = solver.interpolation_grid(y, y_obs)

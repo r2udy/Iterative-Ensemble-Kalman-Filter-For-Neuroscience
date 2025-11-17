@@ -30,7 +30,8 @@ df_copy = df.copy()
 df_copy['pO2Value'] = df_copy['pO2Value'].apply(lambda x: x.flatten())
 df_copy.keys()
 uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
-
+# --
+file_id_saving = 42  # ID for saving the data
 
 # --------------------------
 # Constants initial #
@@ -42,21 +43,24 @@ grid_size = 20 # data size
 cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_var = (cmro2_upper - cmro2_lower)**2  # variance of uniform distribution
 M_var = cmro2_var / cmro2_by_M**2 # model uncertainty scaled
-obs_var_constant = 20.**2
-obs_var_high = 20.**2    # high uncertainty of measurements
-obs_var_low = 1.**2     # low uncertainty of measurements
+obs_var_constant = 5.**2   # constant uncertainty of measurements in the observation covariance matrix R
+sigma = 1.0  # noise level in synthetic data
+obs_var_high = 50.**2    # high uncertainty of measurements
+obs_var_low = 15.**2     # low uncertainty of measurements
 
 # Grid configuration
-mask = (df_copy["arteriole_id"] == 2) & (df_copy['depth_id'] == 3)
-X = df_copy[mask]['pointsX'].tolist()[0]
-Y = df_copy[mask]['pointsY'].tolist()[0]
+# mask = (df_copy["arteriole_id"] == 2) & (df_copy['depth_id'] == 3)
+# X = df_copy[mask]['pointsX'].tolist()[0]
+# Y = df_copy[mask]['pointsY'].tolist()[0]
+
+X, Y = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
 
 # --------------------------
 # EnKF Parameters
 seed = np.random.seed(1)
 state_dim = 1
 obs_dim = 400
-n_ensembles = 50
+n_ensembles = 10
 
 # Initialize the ensemble
 a = np.array([cmro2_lower / cmro2_by_M])
@@ -97,34 +101,7 @@ stats_overall = []
 
 corrections = []
 
-# PDF for the ensemble initialization
-f_alpha = enkf.ensemble.flatten() * cmro2_by_M
-# PDF for the ensemble initialization (KDE + histogram + uniform prior)
-from scipy.stats import gaussian_kde
-samples = f_alpha  # CMRO2 in umol/cm^3/min
-
-kde = gaussian_kde(samples)
-x_grid = np.linspace(samples.min()*(1 - 0.05), samples.max()**(1 + 0.05), 300)
-pdf_kde = kde(x_grid)
-
-# analytical uniform prior between cmro2_lower and cmro2_upper
-prior_pdf = np.where((x_grid >= cmro2_lower) & (x_grid <= cmro2_upper),
-                     1.0 / (cmro2_upper - cmro2_lower), 0.0)
-
-plt.figure(figsize=(6,4))
-plt.hist(samples, bins=30, density=True, alpha=0.4, label='Ensemble (hist)')
-plt.plot(x_grid, pdf_kde, label='KDE', lw=2)
-plt.plot(x_grid, prior_pdf, '--', label='Uniform prior', lw=2)
-plt.axvline(np.mean(samples), color='k', linestyle=':', label='Ensemble mean')
-plt.xlabel('CMRO2 (umol /cm^3 /min)')
-plt.ylabel('Density')
-plt.title('PDF of Ensemble Initialization')
-plt.legend()
-plt.tight_layout()
-plt.show()
-
-
-cmro2_true_values = np.linspace(1., 3., 5)
+cmro2_true_values = 2. * np.ones(4)
 state_ensembles = np.zeros((len(cmro2_true_values), n_ensembles))
 for i, cmro2_true in enumerate(cmro2_true_values):
     
@@ -147,39 +124,38 @@ for i, cmro2_true in enumerate(cmro2_true_values):
     profile_main = generator.pO2_array.reshape((grid_size, grid_size), order='F')
 
     # Second vessel
-    pvessel2 = (profile_main.max() - profile_main.min())
-    center_secondary = (-50.0, -50.0)
+    pvessel2 = (profile_main.max() - profile_main.min()) * (i+1)/4
+    center_secondary = (-80.0, -80.0)
 
     generator2 = MapGenerator(
         cmro2=2.,
         pvessel=pvessel2,
         Rves=10.,
-        R0=70,
-        Rt=70.,
+        R0=60.,
+        Rt=60.,
         X=X,
         Y=Y,
         center=center_secondary)
     profile_secondary = generator2.pO2_array.reshape((grid_size, grid_size), order='F')
-    profile_secondary[profile_secondary < 0] = 0
+    profile_secondary = profile_secondary - profile_secondary.min()
+    profile_secondary[profile_secondary < 0.0] = 0.0
     profile_secondary = gaussian_filter(profile_secondary.flatten(), sigma=2.).reshape((grid_size, grid_size), order='F')
 
     # Add noise to the generated data
-    true_obs = profile_main 
-    sigma = 2.0
-    obs_perturbated = np.random.normal(true_obs.flatten(), scale=sigma)
+    true_obs = profile_main
+    offset_random = np.random.normal(0, 5.) * np.ones(true_obs.flatten().shape[0])
+    obs_perturbated = true_obs.flatten() + np.random.normal(offset_random, scale=sigma)
     obs_perturbated_array = obs_perturbated.reshape((grid_size, grid_size), order='F')
 
-    # fig = plt.figure(figsize=(12, 8))
-    # ax = fig.add_subplot(projection='3d')
-    # sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
-    # # ax.plot_surface(X, Y, profile_main, cmap='viridis', alpha=0.3, edgecolor='none')
-    # # ax.plot_surface(X, Y, profile_secondary, cmap='viridis', alpha=0.3, edgecolor='none')
-    # ax.set_xlabel('X (nm)')
-    # ax.set_ylabel('Y (nm)')
-    # ax.set_zlabel('pO2 (mmHg)')
-    # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
-    # ax.set_title(f'Synthetic pO2 Data with Noise\n (True: CMRO2={cmro2_true} umol/cm^3/min, Pvessel={pvessel} mmHg)')
-    # plt.show()
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(projection='3d')
+    sc = ax.plot_surface(X, Y, profile_secondary, cmap='viridis', edgecolor='none')
+    ax.set_xlabel('X (nm)')
+    ax.set_ylabel('Y (nm)')
+    ax.set_zlabel('pO2 (mmHg)')
+    plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
+    ax.set_title(f'Synthetic pO2 Data with Noise\n offset: {offset_random[0]}')
+    plt.show()
 
     # Find Geometric parameters such as Rves and R0
     analyzer = Po2Analyzer(obs_perturbated_array, X, Y)
@@ -190,13 +166,12 @@ for i, cmro2_true in enumerate(cmro2_true_values):
     center = analyzer.center_ij
     center_coordinates = analyzer.center
 
-
     # ----------------------+ EnKF +----------------------#    
     # R = build_obs_covariance_radial(
     # origin = center,
     # obs_var_high = obs_var_high,
     # obs_var_low = obs_var_low,
-    # mode='linear'
+    # mode='exponential'
     # )
 
     # R = build_obs_covariance_diagonal(
@@ -239,44 +214,19 @@ for i, cmro2_true in enumerate(cmro2_true_values):
                         Y=Y)
     obs_estimation = generator_enkf.pO2_array
 
-    # # -------------------
-    # f_alpha = enkf.ensemble.flatten() * cmro2_by_M
-    # # PDF for the ensemble initialization (KDE + histogram + uniform prior)
-    # from scipy.stats import gaussian_kde
-    # samples = f_alpha  # CMRO2 in umol/cm^3/min
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(projection='3d')
+    sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
+    ax.plot_surface(X, Y, obs_estimation, cmap='plasma', alpha=0.6, edgecolor='none')
+    ax.set_xlabel('X (nm)')
+    ax.set_ylabel('Y (nm)')
+    ax.set_zlabel('pO2 (mmHg)')
+    plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
+    ax.set_title(f'Synthetic pO2 Data with Noise')
+    plt.show()
 
-    # kde = gaussian_kde(samples)
-    # x_grid = np.linspace(samples.min(), samples.max(), 300)
-    # pdf_kde = kde(x_grid)
-    # # analytical uniform prior between cmro2_lower and cmro2_upper
-    # prior_pdf = np.where((x_grid >= cmro2_lower) & (x_grid <= cmro2_upper),
-    #                     1.0 / (cmro2_upper - cmro2_lower), 0.0)
-    # plt.figure(figsize=(6,4))
-    # plt.hist(samples, bins=30, density=True, alpha=0.4, label='Ensemble (hist)')
-    # plt.plot(x_grid, pdf_kde, label='KDE', lw=2)
-    # plt.plot(x_grid, prior_pdf, '--', label='Uniform prior', lw=2)
-    # plt.axvline(np.mean(samples), color='k', linestyle=':', label='Ensemble mean')
-    # plt.xlabel('CMRO2 (umol /cm^3 /min)')
-    # plt.ylabel('Density')
-    # plt.title(f'PDF of Ensemble Step {i+1}')
-    # plt.legend()
-    # plt.tight_layout()
-    # plt.show()
-    # # -------------------
-
-    # fig = plt.figure(figsize=(12, 8))
-    # ax = fig.add_subplot(projection='3d')
-    # sc = ax.plot_surface(X, Y, obs_estimation, cmap='viridis', edgecolor='none')
-    # ax.plot_surface(X, Y, obs.reshape((grid_size, grid_size), order='F'), cmap='viridis', alpha=0.3, edgecolor='none')
-    # ax.set_xlabel('X (nm)')
-    # ax.set_ylabel('Y (nm)')
-    # ax.set_zlabel('pO2 (mmHg)')
-    # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
-    # ax.set_title(f'Synthetic pO2 Data with Noise\n (True: CMRO2={cmro2_true} umol/cm^3/min, Pvessel={pvessel} mmHg)\n (EnKF Estimate: CMRO2={cmro2_mean:.2f} umol/cm^3/min, Pvessel={pvessel_est:.2f} mmHg)')
-    # plt.show()
-
-    error_enkf_relative = np.abs(obs - obs_estimation.flatten()) * 100 / np.abs(obs) 
-    error_enkf_absolute = np.abs(obs - obs_estimation.flatten())
+    error_enkf_relative = np.abs(true_obs.flatten() - obs_estimation.flatten()) * 100 / np.abs(obs) 
+    error_enkf_absolute = np.abs(true_obs.flatten() - obs_estimation.flatten())
 
     # Save stats
     stats_overall.append((cmro2_mean, cmro2_cov))
@@ -304,7 +254,7 @@ stats_overall = np.array(stats_overall)
 
 
 # Path for saving the data
-path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/synthetic_data/constant_02/"
+path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/synthetic_data/constant_" + f"{file_id_saving}/"
 
 # --------- Plots the results ---------
 # Simulated iteration steps
@@ -418,6 +368,20 @@ P.title('Absolute Errors distributions - EnKF')
 P.grid(True)
 P.savefig(path + 'enkf_absolute_error.png', dpi=300, bbox_inches='tight')
 # P.show()
+
+# --------------------------------------
+# Error of the mean estimation
+plt.figure(figsize=(10, 6))
+cmro2_mean_ = stats_overall[:, 0]
+error_abs_cmro2 = np.abs(cmro2_true_values - cmro2_mean_)
+plt.xlabel('$PO_{2}$ Map ID')
+plt.ylabel('Absolute Error in CMRO2 (umol /cm^3 /min)')
+plt.title('Absolute Eroor of CMRO2 Estimation from Synthetic Data')
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.legend()
+plt.grid(True)
+plt.savefig(path + 'enkf_cmro2_abs_error.png', dpi=300, bbox_inches='tight')
+# plt.show()
 
 # -----------------------
 # Uncertainty associated to estimation

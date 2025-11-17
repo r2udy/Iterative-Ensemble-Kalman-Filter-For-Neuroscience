@@ -1,0 +1,4 @@
+One weakness of the EnKF is its sampling error. Because the model has no physical time, we can associate a model error. This could ultimately lead the filter to diverge, as the error allows it to explore possible state values. 
+We construct a fictive time evolution in which, at each step, instead of considering the time evolution of the state(s), we use a new data (map) to filter (estimate) oxygen consumption. The associated uncertainty is what we call here "inflation" which might not be the right term. In general, it is an artificial model error associated with artificial time steps.
+
+We consider the model for synthetic data, where all quantities are assumed to be known except cmro2. We adjust the intensity associated with the model error/inflation. For low inflation, the filter collapses.

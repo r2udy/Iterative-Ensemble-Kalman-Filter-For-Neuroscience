@@ -1,300 +1,304 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Created on Thu Jun 26 11:36:47 2025
+
+@author: ruudybayonne
+"""
 
 import sys
 import os
 
+py_data_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/"
 py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/classes/"
 sys.path.append(os.path.abspath(py_file_location))
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.interpolate import griddata
-from MapGenerator import MapGenerator
-from circlesearch import Po2Analyzer
+from scipy.stats import gaussian_kde
+from scipy.ndimage import gaussian_filter
+from EnKF_FEM import build_obs_covariance_radial, build_obs_covariance_diagonal
 from EnKF_FEM_2 import EnKF
+from circlesearch import Po2Analyzer
+from MapGenerator import MapGenerator
+from Po2Dataset import load_data
 import pylab as P
 
+# --------- Load data --------- #
+df = pd.read_pickle(py_data_location + "dataset.pkl")
+df_copy = df.copy()
+df_copy['pO2Value'] = df_copy['pO2Value'].apply(lambda x: x.flatten())
+df_copy.keys()
+uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
+# --
+file_id_saving = "2states_varying_alternative_source_02"  # ID for saving the data
 
-def interpolation_grid(grid_refined, grid_coarse):
-    def find_closest_point(given_point, array_of_points):
-        # Use Euclidean distance for multi-dimensional points
-        distances = np.abs(array_of_points - given_point)
-        closest_index = np.argmin(distances)
-        return closest_index
-
-    idx_list = []
-    for point_coarse in grid_coarse:
-        closest_idx = find_closest_point(point_coarse, grid_refined)
-        idx_list.append(closest_idx)
-    
-    return np.array(idx_list)
-
-
-# --------- Perform the estimation ---------
-
-# Initial Constants
+# --------------------------
+# Constants initial #
 D = 4.0e3
 alpha = 1.39e-15
-cmro2_low, cmro2_high = 1, 3 # umol/cm3/min
 cmro2_by_M = (60 * D * alpha * 1e12)
+grid_size = 20 # data size
 
 cmro2_lower, cmro2_upper = 1.0, 3.0
-cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12
-M_std = np.sqrt(cmro2_var) / cmro2_by_M
-obs_uncertainty = 3.0 # measurement uncertainty
-R0_uncertainty = 10.0 # prior uncertainty of caparilary-free space radius
+R0_lower, R0_upper = 80., 120.
+cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12 # variance of uniform distribution
+M_var = cmro2_var / cmro2_by_M**2 # model uncertainty scaled
+R0_var = 5.0**2 # prior uncertainty of caparilary-free space radius
+obs_var_constant = 5.**2   # constant uncertainty of measurements in the observation covariance matrix R
+sigma = 2.0  # noise level in synthetic data
+obs_var_high = 5.**2    # high uncertainty of measurements
+obs_var_low = 1.**2     # low uncertainty of measurements
 
-n = 20 # data size
-pixel_size = 10.0
+# Grid configuration
+# mask = (df_copy["arteriole_id"] == 2) & (df_copy['depth_id'] == 3)
+# X = df_copy[mask]['pointsX'].tolist()[0]
+# Y = df_copy[mask]['pointsY'].tolist()[0]
 
+X, Y = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
+
+# --------------------------
 # EnKF Parameters
 seed = np.random.seed(1)
 state_dim = 2
 obs_dim = 400
-n_ensembles = 100
+n_ensembles = 50
 
-# Covariance Matrix
-Q   = np.array([[M_std,            0.0],
-                [0.0,   R0_uncertainty]])   # Background covariance matrix
-R   = obs_uncertainty * np.eye(obs_dim)    # Observation covariance matrix
-
-# Create coordinate grids in physical units (microns)
-cols, rows = 20, 20
-X, Y = np.meshgrid(np.arange(cols), np.arange(rows))
-X = X * pixel_size
-Y = Y * pixel_size
+# Initialize the ensemble
+a = np.array([cmro2_lower / cmro2_by_M, R0_lower])
+b = np.array([cmro2_upper / cmro2_by_M, R0_upper])
 
 # No dynamic model
 def dynamics_model(x):
-  return x
+    return x
 
-# Initialization of Arrays
-errors = []
+# -------------------------
+# Create the EnKF object
+enkf = EnKF(state_dim, obs_dim, n_ensembles, dynamics_model, seed)
+
+# Initialize the EnKF method
+enkf.initialize_ensemble(a, b)
+    
+# Update the the background noise
+B   = np.array([[M_var,    0.0],
+                [0.0,   R0_var]])   # Background covariance matrix
+enkf.set_process_noise(B)
+
+# Initialize lists to store meaningful quantities
 observations = []
-cmro2_est_lsqnonlin = []
 cmro2_est_enkf = []
 cmro2_cov_est_enkf = []
 R0_est_enkf = []
 R0_cov_est_enkf = []
+pvessel_est_enkf = []
+pvessel_cov_est_enkf = []
+state_ensembles = []
+errors_enkf_relative = []
+errors_enkf_absolute = []
 means = []
 covs = []
-cmro2_true_values = np.linspace(1., 3., 5)
-state_ensembles_M = np.zeros((len(cmro2_true_values), n_ensembles))
-state_ensembles_R0 = np.zeros((len(cmro2_true_values), n_ensembles))
+stats_overall = []
+corrections = []
+cmro2_true_values = np.linspace(1.0, 3.0, 3)
+state_ensembles = np.zeros((state_dim, len(cmro2_true_values), n_ensembles))
 
+
+# ------------------+ Synthetic Data +------------------ #
 for i, cmro2_true in enumerate(cmro2_true_values):
     
-    # ------------------+ Synthetic Data +------------------ #
+    # First vessel
+    pvessel = 80.0
+    M = cmro2_true / cmro2_by_M
+    Rves = 11.
+    R0=100.
+    Rt=100.
+
+    generator = MapGenerator(
+        cmro2=cmro2_true,
+        pvessel=pvessel,
+        Rves=Rves,
+        R0=R0,
+        Rt=Rt,
+        X=X,
+        Y=Y)
+    profile_main = generator.pO2_array.reshape((grid_size, grid_size), order='F')
+
+    # Second vessel
+    pvessel2 = (profile_main.max() - profile_main.min())
+    center_secondary = (-150.0, -150.0)
+    generator2 = MapGenerator(
+        cmro2=2.,
+        pvessel=pvessel2,
+        Rves=10.,
+        R0=60.,
+        Rt=60.,
+        X=X,
+        Y=Y,
+        center=center_secondary)
+    profile_secondary = generator2.pO2_array.reshape((grid_size, grid_size), order='F')
+    profile_secondary = profile_secondary - profile_secondary.min()
+    profile_secondary[profile_secondary < 0.0] = 0.0
+    profile_secondary = gaussian_filter(profile_secondary.flatten(), sigma=2.).reshape((grid_size, grid_size), order='F')
+
     # Add noise to the generated data
-    data_one_hole_axis  = np.load(f"/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/square_one_hole_id{i+1}_coordinates.npy")
-    data_one_hole       = np.load(f"/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/square_one_hole_id{i+1}_solution.npy")
+    true_obs = profile_main + profile_secondary
+    offset_random = np.random.normal(0, 5.) * np.ones(true_obs.flatten().shape[0])
+    obs_perturbated = true_obs.flatten() + np.random.normal(np.zeros(true_obs.flatten().shape[0]), scale=sigma) + offset_random
+    obs_perturbated_array = obs_perturbated.reshape((grid_size, grid_size), order='F')
 
-    # Interpolate to observation grid
-    # Assign the data
-    z = data_one_hole
-    x = data_one_hole_axis[:, 0]
-    y = data_one_hole_axis[:, 1]
+    # fig = plt.figure(figsize=(12, 8))
+    # ax = fig.add_subplot(projection='3d')
+    # sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
+    # ax.plot_surface(X, Y, true_obs, cmap='plasma', alpha=0.6, edgecolor='none')
+    # ax.plot_surface(X, Y, profile_secondary, cmap='viridis', edgecolor='none')
+    # ax.set_xlabel('X (nm)')
+    # ax.set_ylabel('Y (nm)')
+    # ax.set_zlabel('pO2 (mmHg)')
+    # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
+    # ax.set_title(f'Synthetic pO2 Data with Noise\n offset: {offset_random[0]}')
+    # plt.show()
 
-    x_min, x_max = np.min(x), np.max(x)
-    y_min, y_max = np.min(y), np.max(y)
+    # Find Geometric parameters such as Rves and R0
+    analyzer = Po2Analyzer(obs_perturbated_array, X, Y)
+    analyzer.find_circles()
+    Rves_est = analyzer.rin
+    pvessel_est = analyzer.p_vessel
+    center = analyzer.center_ij
+    center_coordinates = analyzer.center
     
-    # Create observation grid points
-    x_obs = np.linspace(x_min, x_max, n)
-    y_obs = np.linspace(y_min, y_max, n)
-    
-    # Create simulation grid
-    x_idx_domain = interpolation_grid(x, x_obs)
-    y_idx_domain = interpolation_grid(y, y_obs)
-    x_domain = x[x_idx_domain]
-    y_domain = y[y_idx_domain]
-    X_domain, Y_domain = np.meshgrid(x_domain, y_domain)
-    points = np.column_stack((X_domain.ravel(), Y_domain.ravel()))
-    obs = griddata((x, y), z, points, method='linear')
-    sigma = 2.0
-    obs_perturbated = np.random.normal(obs, scale=sigma)
-    observations.append(obs_perturbated)
-
-    ##
     # ----------------------+ EnKF +----------------------#
-    enkf = EnKF(state_dim, obs_dim, n_ensembles, dynamics_model, seed)
-    
-    ##
-    #Initialize the ensemble
-    cmro2_pertubed = np.random.normal(cmro2_true, scale=M_std * cmro2_by_M)
-    a = np.array([cmro2_pertubed / cmro2_by_M, 80.])
-    b = np.array([M_std, R0_uncertainty])
-    enkf.initialize_ensemble(a, b)
-    
+    R = build_obs_covariance_radial(
+    origin = center,
+    obs_var_high = obs_var_high,
+    obs_var_low = obs_var_low,
+    mode='exponential'
+    )
+
+    # R = build_obs_covariance_diagonal(
+    #     grid_size=grid_size,
+    #     origin=center,
+    #     angle_ranges=[angles_1, angles_2],
+    #     min_radius=min_radius,
+    #     obs_var_high=obs_var_high,
+    #     obs_var_low=obs_var_low
+    # )
+
+    # R = obs_var_constant * np.eye(obs_dim) # Observation covariance matrix
+
     # Update the the background and observation noise
-    enkf.set_process_noise(Q)
     enkf.set_observation_noise(R)
     
+    # Simulate a sequence with observation for the uniform case
+    # Observations
+    obs = obs_perturbated
+    observations.append(obs)
+
     # EnKF steps
     enkf.predict()
-    enkf.update(obs)
+    enkf.update(obs, X, Y)
     
     # Get current estimate
     mean, cov = enkf.get_state_estimate()
-    state_ensembles_M[i, :] = enkf.get_ensemble()[0, :]
-    state_ensembles_R0[i, :] = enkf.get_ensemble()[1, :]
 
     cmro2_mean = mean[0] * cmro2_by_M
-    R0_mean    = mean[1]
-    cmro2_est_enkf.append(cmro2_mean)
-    R0_est_enkf.append(R0_mean)
+    R0_mean = mean[1]
 
-    cmro2_cov   = cov[0 ,0] * (cmro2_by_M)**2
-    R0_cov      = cov[1, 1]
-    cmro2_cov_est_enkf.append(cmro2_cov)
-    R0_cov_est_enkf.append(cmro2_cov)
+    cmro2_cov = cov[0, 0] * (cmro2_by_M**2)
+    R0_cov = cov[1, 1]
+
+    correction = np.abs(np.mean(enkf.length_scale * enkf.K @ enkf.innovation))
     
-    means.append(mean)
-    covs.append(cov)
+    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
+                        pvessel=pvessel, 
+                        Rves=Rves, 
+                        R0=R0_mean, 
+                        Rt=R0_mean,
+                        X=X,
+                        Y=Y)
+    obs_estimation = generator_enkf.pO2_array
 
-    pO2_array = obs_perturbated.reshape((n, n), order='F')
-    cmro2 = cmro2_mean
-    M = cmro2_mean / cmro2_by_M
-    pvessel = obs.max()
+    # fig = plt.figure(figsize=(12, 8))
+    # ax = fig.add_subplot(projection='3d')
+    # sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
+    # ax.plot_surface(X, Y, obs_estimation, cmap='plasma', alpha=0.6, edgecolor='none')
+    # ax.set_xlabel('X (nm)')
+    # ax.set_ylabel('Y (nm)')
+    # ax.set_zlabel('pO2 (mmHg)')
+    # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
+    # ax.set_title(f'Synthetic pO2 Data with Noise')
+    # plt.show()
 
-    # Find circles
-    analyzer = Po2Analyzer(pO2_array, pixel_size)
-    analyzer.find_circles()
-    Rves = analyzer.rin
-    R0 = R0_mean
-    Rt = R0_mean
-    generator = MapGenerator(cmro2=cmro2, pvessel=pvessel, Rves=Rves, R0=R0, Rt=Rt)
-    error = obs - generator.pO2_array.flatten()
-    errors.append(np.abs(error))
+    error_enkf_relative = np.abs(true_obs.flatten() - obs_estimation.flatten()) * 100 / np.abs(obs) 
+    error_enkf_absolute = np.abs(true_obs.flatten() - obs_estimation.flatten())
+
+    # Save stats
+    stats_overall.append((cmro2_mean, cmro2_cov))
+    errors_enkf_relative.append(np.abs(error_enkf_relative)) # Save the relative errors
+    errors_enkf_absolute.append(np.abs(error_enkf_absolute)) # Save the absolute errors
+    pvessel_est_enkf.append(pvessel_est)
+    corrections.append(correction)
+    cmro2_est_enkf.append(cmro2_mean)
+    cmro2_cov_est_enkf.append(cmro2_cov)
+    R0_est_enkf.append(R0_mean)
+    R0_cov_est_enkf.append(R0_cov)
+    state_ensembles[0, i, :] = enkf.ensemble[0, :]  # CMRO2 ensembles
+    state_ensembles[1, i, :] = enkf.ensemble[1, :]  # R0 ensembles
 
     print("\n\n Ensemble Kalman Filter paramaters estimation:")
     print("-"*65)
     print(f"\nCMRO2 Mean: {cmro2_mean}, CMRO2 √(Cov): {np.sqrt(cmro2_cov)}, cmro2 Covariance: {cmro2_cov}")
     print("-"*25)
     print(f"R0 Mean: {R0_mean}, R0 √(Cov): {np.sqrt(R0_cov)}, R0 Covariance: {R0_cov}\n")
-    
-    # # Create the plot1
-    # fig = plt.figure(figsize=(8, 6))
-    # ax = fig.add_subplot(111, projection='3d')
-    
-    # # Create coordinate grids in physical units (microns)
-    # X = np.meshgrid(np.arange(n), np.arange(n))[0] * pixel_size
-    # Y = np.meshgrid(np.arange(n), np.arange(n))[1] * pixel_size
-
-    # # Plot surface
-    # surf = ax.plot_surface(X, Y, pO2_array, 
-    #                         cmap='jet',
-    #                         rstride=1, cstride=1,
-    #                         linewidth=0, 
-    #                         antialiased=True,
-    #                         alpha=0.3)
-    
-    # surf = ax.plot_surface(X, Y, generator.pO2_array, 
-    #                         cmap='viridis',
-    #                         rstride=1, cstride=1,
-    #                         linewidth=0, 
-    #                         antialiased=True)
-
-    # # Add labels and colorbar
-    # ax.set_xlabel('X (µm)')
-    # ax.set_ylabel('Y (µm)')
-    # ax.set_zlabel('Partial Pressure (mmHg)')
-    # ax.set_title(f'The predicted CMRO2={cmro2:0.3f}', fontsize=18)
-    # fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10)
-    # plt.tight_layout()
-    # plt.show()
 
 cmro2_est_enkf = np.array(cmro2_est_enkf)
-R0_est_enkf = np.array(R0_est_enkf)
 cmro2_cov_est_enkf = np.array(cmro2_cov_est_enkf)
+R0_est_enkf = np.array(R0_est_enkf)
 R0_cov_est_enkf = np.array(R0_cov_est_enkf)
-means = np.array(means)
-covs = np.array(covs)
+pvessel_est_enkf = np.array(pvessel_est_enkf)
+corrections =  np.array(corrections)
+errors_enkf_relative = np.array(errors_enkf_relative)
+errors_enkf_absolute = np.array(errors_enkf_absolute)
 observations = np.array(observations)
-errors = np.array(errors)
+stats_overall = np.array(stats_overall)
 
 
-# ----------------------+ Plots the results +----------------------#
 
+# Path for saving the data
+path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/synthetic_data/" + file_id_saving + "/"
+
+# --------- Plots the results ---------
 # Simulated iteration steps
-observations_id = [1, 2, 3, 4, 5]
+observations_id = [i for i in range(1, len(observations) + 1)]
 observations = np.array(observations)
 x = np.arange(1, len(observations_id) + 1)
-
 # Stats
 overall_mean = cmro2_est_enkf.mean()
 
-# -----------------------
-# Ratio M Stats
-data = state_ensembles_M.T * cmro2_by_M # Define data
+data = state_ensembles[0].T * cmro2_by_M # Define data
 numBoxes = len(observations) # Define numBoxes
-names = [f'obs {i}' for i in range(1, numBoxes + 1)]
+names = [f'obs {i}' for i in observations_id]
 
 P.figure()
 bp = P.boxplot(data, labels=names)
-
 for i in range(numBoxes):
     y = data[:, i]
     x = np.random.normal(1+i, 0.04, size=len(y))
     P.plot(x, y, 'r.', alpha=0.2)
 P.xlabel('$PO_{2}$ Map ID')
-P.ylabel('State value CMRO2 (umol /cm^3 /min)')
+P.ylabel('State value CMRO2 (umol /cm^3 /min)')
 P.title('EnKF State Estimation with Uncertainty')
 P.grid(True)
-P.show()
-
-# -----------------------
-# Radius R0 Stats
-data = state_ensembles_R0.T # Define data
-numBoxes = len(observations) # Define numBoxes
-names = [f'obs {i}' for i in range(1, numBoxes + 1)]
-
-P.figure()
-bp = P.boxplot(data, labels=names)
-
-for i in range(numBoxes):
-    y = data[:, i]
-    x = np.random.normal(1+i, 0.04, size=len(y))
-    P.plot(x, y, 'r.', alpha=0.2)
-P.xlabel('$PO_{2}$ Map ID')
-P.ylabel('State value CMRO2 (umol /cm^3 /min)')
-P.title('EnKF State Estimation with Uncertainty')
-P.grid(True)
-P.show()
-
-# -----------------------
-# Absolute Error Stats
-# Simulated iteration steps
-x = np.arange(1, len(observations_id) + 1)
-
-# Stats
-data = errors.T # Define data
-
-P.figure()
-
-bp = P.boxplot(data, labels=names)
-
-for i in range(numBoxes):
-    y = data[:, i]
-    x = np.random.normal(1+i, 0.04, size=len(y))
-    P.plot(x, y, 'r.', alpha=0.2)
-P.xlabel('$PO_{2}$ Map ID')
-P.ylabel('Absolute Partial Pressure Error')
-P.title('Errors repartition')
-P.grid(True)
-P.show()
-
+P.savefig(path + 'enkf_state_estimation_test.png', dpi=300, bbox_inches='tight')
+# P.show()
 
 
 # Simulated time steps
 x = cmro2_true_values  
-
 # Create figure
 plt.figure(figsize=(10, 6))
-
 # Plot mean +/- 1 standard deviation (sqrt of variance)
 plt.plot(x, cmro2_true_values, '-x', color='black', label='True paramter (CMRO2)')
-# plt.plot(x, cmro2_est_lsqnonlin, '-x', label='LSQNonLin estimate (CMRO2 + pvessel + $R_{0}$)')
 plt.plot(x, cmro2_est_enkf, '-x', color='green', label='State EnKF estimate (CMRO2)')
 plt.fill_between(
     x,
@@ -302,13 +306,153 @@ plt.fill_between(
     cmro2_est_enkf + np.sqrt(cmro2_cov_est_enkf),  # Upper bound (mean + σ)
     color='blue',
     alpha=0.2,
-    label='Uncertainty (+/- 1 StD)'
+    label='Uncertainty (+/- sigma)'
 )
-
 # Labels and title
 plt.ylabel('Estimated CMRO2 (umol /cm^3 /min)')
 plt.xlabel('Input CMRO2 (umol /cm^3 /min)')
 plt.title('EnKF State Estimation with Uncertainty using Krogh-Erlang Cylinder Model')
 plt.legend()
 plt.grid(True)
-plt.show()
+plt.savefig(path + 'enkf_state_estimation_time_steps.png', dpi=300, bbox_inches='tight')
+# plt.show()
+
+# -----------------------
+# R0 Stats
+# -----------------------
+observations_id = [i for i in range(1, len(observations) + 1)]
+observations = np.array(observations)
+
+data = state_ensembles[1].T
+numBoxes = len(observations) # Define numBoxes
+names = [f'obs {i}' for i in observations_id]
+
+P.figure()
+bp = P.boxplot(data, labels=names)
+for i in range(numBoxes):
+    y = data[:, i]
+    x = np.random.normal(1+i, 0.04, size=len(y))
+    P.plot(x, y, 'r.', alpha=0.2)
+P.xlabel('$PO_{2}$ Map ID')
+P.ylabel('State value R0 (um)')
+P.title('EnKF R0 State Estimation with Uncertainty')
+P.grid(True)
+P.savefig(path + 'enkf_R0_state_estimation.png', dpi=300, bbox_inches='tight')
+# P.show()
+
+# -----------------------
+# Relative Error Stats
+# Stats
+data = errors_enkf_relative.T # Define data
+numBoxes = data.shape[1]  # now robust
+names = [f'obs{i}' for i in range(1, numBoxes + 1)]
+P.figure()
+bp = P.boxplot(data, labels=names)
+for i in range(numBoxes):
+    y = data[:, i]
+    x = np.random.normal(1+i, 0.04, size=len(y))
+    P.plot(x, y, 'r.', alpha=0.2)
+P.xlabel('$PO_{2}$ Map ID')
+P.ylabel('Relative Partial Pressure Error')
+P.title('Relative Errors distributions - EnKF')
+P.grid(True)
+P.savefig(path + 'enkf_relative_error.png', dpi=300, bbox_inches='tight')
+# P.show()
+
+# -----------------------
+# Absolute Error Stats
+# Stats
+data = errors_enkf_absolute.T # Define data
+numBoxes = data.shape[1]  # now robust
+names = [f'obs{i}' for i in range(1, numBoxes + 1)]
+P.figure()
+bp = P.boxplot(data, labels=names)
+for i in range(numBoxes):
+    y = data[:, i]
+    x = np.random.normal(1+i, 0.04, size=len(y))
+    P.plot(x, y, 'r.', alpha=0.2)
+P.xlabel('$PO_{2}$ Map ID')
+P.ylabel('Absolute Partial Pressure Error')
+P.title('Absolute Errors distributions - EnKF')
+P.grid(True)
+P.savefig(path + 'enkf_absolute_error.png', dpi=300, bbox_inches='tight')
+# P.show()
+
+# --------------------------------------
+# Error of the mean estimation
+# ---------------------------------------
+data = state_ensembles[0] * cmro2_by_M # Define data
+numBoxes = data.shape[0] 
+x_obs = np.arange(1, numBoxes + 1)
+
+plt.figure(figsize=(10, 6))
+cmro2_mean_ = stats_overall[:, 0]
+error_abs_cmro2 = np.abs(cmro2_true_values - cmro2_mean_)
+plt.plot(x_obs, error_abs_cmro2, '-o', color='blue', label='Absolute Error in CMRO2 estimation')
+plt.xlabel('$PO_{2}$ Map ID')
+plt.ylabel('Absolute Error in CMRO2 (umol /cm^3 /min)')
+plt.title('Absolute Error of CMRO2 Estimation from Synthetic Data')
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.legend()
+plt.grid(True)
+plt.savefig(path + 'enkf_cmro2_abs_error.png', dpi=300, bbox_inches='tight')
+# plt.show()
+
+# -----------------------
+# Uncertainty associated to estimation
+data = state_ensembles[0] * cmro2_by_M # Define data
+# -----------------------
+numBoxes = data.shape[0]  # now robust
+x_obs = np.arange(1, numBoxes + 1)
+
+fig, ax = plt.subplots(figsize=(10, 6))
+cov_track = np.array([np.std(array) for array in data])
+ax.plot(x_obs, cov_track, '-o', color='blue', label='Uncertainty in CMRO2 estimation (StD)')
+plt.ylabel('Estimated CMRO2 Uncertainty (umol /cm^3 /min)')
+plt.xlabel('$PO_{2}$ Map ID')
+plt.title('EnKF Uncertainty')
+plt.grid(True)
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.legend()
+plt.tight_layout()
+plt.savefig(path + 'enkf_uncertainty.png', dpi=300, bbox_inches='tight')
+# plt.show()
+
+# -----------------------
+# Uncertainty associated to estimation
+# Create figure
+plt.figure(figsize=(10, 6))
+cmro2_mean_ = stats_overall[:, 0]
+cmro2_cov_ = stats_overall[:, 1]
+# Plot mean +/- 1 standard deviation (sqrt of variance)
+plt.plot(x_obs, cmro2_mean_, '-o', color='green', label='State EnKF estimate (CMRO2)')
+plt.fill_between(
+    x_obs,
+    cmro2_mean_ - np.sqrt(cmro2_cov_),  # Lower bound (mean - σ)
+    cmro2_mean_ + np.sqrt(cmro2_cov_),  # Upper bound (mean + σ)
+    color='blue',
+    alpha=0.2,
+    label='Uncertainty (+/- 1 StD)'
+)
+plt.xlabel('$PO_{2}$ Map ID')
+plt.ylabel('CMRO2 (umol /cm^3 /min)')
+plt.title('EnKF CMRO2 Estimation with Uncertainty')
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.axhline(y=np.mean(cmro2_mean_), color='r', linestyle='--', label='Mean CMRO2')
+plt.axhline(y=cmro2_lower, color='orange', linestyle='--', label='CMRO2 Lower Bound (Prior)')
+plt.axhline(y=cmro2_upper, color='orange', linestyle='--', label='CMRO2 Upper Bound (Prior)')
+plt.legend()
+plt.grid(True)
+plt.savefig(path + 'enkf_cmro2_estimation_and_uncertainty.png', dpi=300, bbox_inches='tight')
+# plt.show()
+
+
+# Save the data
+np.save(path + f"state_ensembles_{n_ensembles}.npy", state_ensembles)
+np.save(path + f"cmro2_means_{n_ensembles}.npy",stats_overall[:, 0])
+np.save(path + f"cmro2_covs_{n_ensembles}.npy", stats_overall[:, 1])
+np.save(path + f"R0_means_{n_ensembles}.npy", R0_est_enkf)
+np.save(path + f"R0_covs_{n_ensembles}.npy", R0_cov_est_enkf)
+np.save(path + f"p_vessel_estimates_{n_ensembles}.npy", pvessel_est_enkf)
+np.save(path + f"errors_enkf_relative_{n_ensembles}.npy", errors_enkf_relative)
+np.save(path + f"errors_enkf_absolute_{n_ensembles}.npy", errors_enkf_absolute)

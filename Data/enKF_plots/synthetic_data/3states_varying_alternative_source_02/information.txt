@@ -1,0 +1,55 @@
+running command: run_enkf 8 EnKF_3_FEM_synthetic_data.py
+Model: FEM -> confounded radii R_0 and R_t
+State: [M, R0, pvessel]
+n_ensembles = 50
+obs_dim = 400
+D = 4.0e3
+alpha = 1.39e-15
+
+# Initial guess: Uniform distribution for cmro2
+cmro2_lower, cmro2_upper = 1.0, 3.0
+
+# Initial guess: Uniform distribution for R0
+R0_lower, R0_upper = 80.0, 120.0
+
+# Initial guess: Uniform distribution for R0
+pvessel_lower, pvessel = 40., 60.
+
+# Synthetic Data
+2. umol /cm^3 /min x 10 times
+Gaussian White noise: sigma=2.
+
+# Alternative source
+center = (-150, -150)
+cmro2=2.
+pvessel=(profile_main.max() - profile_main.min())
+Rves=10.
+R0=60.
+offset = random.normal(0., 5.)
+profile_secondary[profile_secondary < 0.0] = 0.0
+profile_secondary = gaussian_filter(profile_secondary, sigma=2.)
+
+
+# Covariance matrix
+M_var = cmro2_var / cmro2_by_M**2 / 12 = 0.33
+R0_var = 5.**2
+pvessel_var = 3.**2
+B   = np.array([[M_var,    0.0,        0.0],
+                [0.0,      R0_var,     0.0],
+                [0.0,   0.0,           pvessel_var]])   # Background covariance matrix
+R = Spatially varying matrix exponential (obs_var_low, obs_var_high) * I(obs_dim, obs_dim) # Observation covariance matrix
+obs_var_high = 5.**2    # high uncertainty of measurements
+obs_var_low = 1.**2     # low uncertainty of measurements
+
+Main source
+p_vessel: estimated = 80.0
+R_art: 	True R_art = 11.0
+R0: 	estimated = 100.0
+
+# Finite Element Method
+Library: FEniCS
+Mesh center: (0, 0, 0)
+Mesh size: 200x200
+
+# Coordinates
+X, Y = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
