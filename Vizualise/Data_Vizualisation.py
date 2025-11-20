@@ -9,8 +9,8 @@ import os
 import sys
 
 py_data_location = '/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data'
-py_file_location = '/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/classes'
-sys.path.append(py_file_location)
+py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/classes/"
+sys.path.append(os.path.abspath(py_file_location))
 
 import math
 import numpy as np
@@ -32,8 +32,6 @@ df_copy.keys()
 uniform_dataset = load_data(py_data_location + '/uniform_dataset.txt')
 # Create a set of all (art_id, dth_id) pairs for O(1) lookups
 pair_set = {entry[0] for entry in uniform_dataset}
-
-
 
 
 # ------------------- 

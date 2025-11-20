@@ -3,11 +3,11 @@
 <Xdmf Version="3.0" xmlns:xi="https://www.w3.org/2001/XInclude">
   <Domain>
     <Grid Name="mesh" GridType="Uniform">
-      <Topology TopologyType="Triangle" NumberOfElements="22734" NodesPerElement="3">
-        <DataItem Dimensions="22734 3" NumberType="Int" Format="HDF">square_one_hole_id0_test.h5:/Mesh/mesh/topology</DataItem>
+      <Topology TopologyType="Triangle" NumberOfElements="26920" NodesPerElement="3">
+        <DataItem Dimensions="26920 3" NumberType="Int" Format="HDF">square_one_hole_id0_test.h5:/Mesh/mesh/topology</DataItem>
       </Topology>
       <Geometry GeometryType="XY">
-        <DataItem Dimensions="11513 2" Format="HDF">square_one_hole_id0_test.h5:/Mesh/mesh/geometry</DataItem>
+        <DataItem Dimensions="13659 2" Format="HDF">square_one_hole_id0_test.h5:/Mesh/mesh/geometry</DataItem>
       </Geometry>
     </Grid>
     <Grid Name="f" GridType="Collection" CollectionType="Temporal">
@@ -15,7 +15,7 @@
         <xi:include xpointer="xpointer(/Xdmf/Domain/Grid[@GridType='Uniform'][1]/*[self::Topology or self::Geometry])" />
         <Time Value="0" />
         <Attribute Name="f" AttributeType="Scalar" Center="Node">
-          <DataItem Dimensions="11513 1" Format="HDF">square_one_hole_id0_test.h5:/Function/f/0</DataItem>
+          <DataItem Dimensions="13659 1" Format="HDF">square_one_hole_id0_test.h5:/Function/f/0</DataItem>
         </Attribute>
       </Grid>
     </Grid>

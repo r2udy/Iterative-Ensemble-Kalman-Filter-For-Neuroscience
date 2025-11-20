@@ -5,27 +5,28 @@ Created on Fri Jun  6 16:54:17 2025
 @author: ruudy
 """
 
+import os
+import sys
+
+py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/FEM_code/"
+sys.path.append(os.path.abspath(py_file_location))
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
 from typing import Tuple
 from mpi4py import MPI
-from FEM_code.generateMesh_Solver_one_hole import DiffusionSolver, SolverParameters, HoleGeometry
+from FEM_code.generateMesh_Solver_multiple_holes import DiffusionSolver, SolverParameters, HoleGeometry
 
 
 
 class MapGenerator:
     def __init__(self,
-                 cmro2: float,
-                 pvessel: float,
-                 Rves: float,
-                 R0: float,
-                 Rt: float,
+                 holes: HoleGeometry,
+                 params: SolverParameters,
                  X: np.ndarray = None,
                  Y: np.ndarray = None,
-                 model: str = 'KE',
                  pixel_size: float = 10.0,
-                 center: Tuple[int, int] = (0, 0),
                  grid_size: Tuple[int, int] = (20, 20)):
         
         """
@@ -51,101 +52,20 @@ class MapGenerator:
         self.cmro2_by_M = self.SEC_MIN * self.UM3_M3 / self.CM3_M3 * self.D * self.alpha
         
         # Vascular parameters
+        self.holes = holes
+        self.params = params
         self.cols, self.rows = 20, 20
-        self.cmro2 = cmro2
-        self.M = self.cmro2 / self.cmro2_by_M
-        self.pvessel = pvessel
-        self.Rves = Rves
-        self.R0 = R0
-        self.Rt = Rt
         self.pixel_size = pixel_size
         
         # Grid configuration
-        self.center = np.array(center)
         self.cols, self.rows = grid_size
         self.X, self.Y = X, Y
         
         # Generate pressure map
-        self.model = model
-        self.pO2_array = self.generate_map()
+        self.pO2_array = self.generate_map(holes=holes, params=params)
     
-    def _partial_pressure_KE(self, r: np.ndarray) -> np.ndarray:
-        """
-        Calculate partial pressure from Krogh-Erlang model at given radial distances.
         
-        Args:
-            r: Array of radial distances from vessel center (µm)
-            
-        Returns:
-            Array of partial pressures (mmHg)
-        """
-        r = np.asarray(r)
-        if np.any(r <= 0):
-            raise ValueError("All radius values must be positive and non-zero.")
-        
-        term_r_Rves     = self.pvessel
-        term_Rves_r_Rt  = lambda x: self.pvessel + (self.M / 4) * (x**2 - self.Rves**2) - (self.M * self.R0**2 / 2) * np.log(x / self.Rves)
-        
-        # Initialize result array
-        result = np.zeros_like(r)
-    
-        # Region masks
-        inside_vessel = r < self.Rves
-        vessel_wall = r >= self.Rves
-    
-        # Region 1: Inside vessel
-        result[inside_vessel] = term_r_Rves
-        
-        # Region 2: Vessel wall
-        if np.any(vessel_wall):
-            r_masked = r[vessel_wall]
-            result[vessel_wall] = term_Rves_r_Rt(r_masked) 
-
-        return result
-    
-    def _partial_pressure(self, r: np.ndarray) -> np.ndarray:
-        """
-        Calculate partial pressure from ODACITI model at given radial distances.
-        
-        Args:
-            r: Array of radial distances from vessel center (µm)
-            
-        Returns:
-            Array of partial pressures (mmHg)
-        """
-        r = np.asarray(r)
-        if np.any(r <= 0):
-            raise ValueError("All radius values must be positive and non-zero.")
-            
-        beta            = (self.M / 2) * (self.Rves**2 - self.R0**2)
-        term_r_Rves     = self.pvessel
-        term_Rves_r_Rt  = lambda x: self.pvessel + (self.M / 4) * ((x**2 - self.Rves**2) - 2 * self.Rves**2 * np.log(x / self.Rves)) + beta * np.log(x / self.Rves)
-        term_Rt_r       = lambda x: self.pvessel + (self.M / 4) * ((self.Rt**2 - self.Rves**2) - 2 * self.Rves**2 * np.log(x / self.Rves) + 2 * self.Rt**2 * np.log(x / self.Rt)) + beta * np.log(x / self.Rves)
-        
-        # Initialize result array
-        result = np.zeros_like(r)
-    
-        # Region masks
-        inside_vessel = r < self.Rves
-        vessel_wall = (r >= self.Rves) & (r < self.Rt)
-        tissue = r >= self.Rt
-    
-        # Region 1: Inside vessel
-        result[inside_vessel] = term_r_Rves
-    
-        # Region 2: Vessel wall
-        if np.any(vessel_wall):
-            r_masked = r[vessel_wall]
-            result[vessel_wall] = term_Rves_r_Rt(r_masked) 
-
-        # Region 3: Tissue
-        if np.any(tissue):
-            r_masked = r[tissue]
-            result[tissue] = term_Rt_r(r_masked)
-
-        return result
-        
-    def generate_map(self) -> np.ndarray:
+    def generate_map(self, holes, params) -> np.ndarray:
 
         # Generate mesh with dynamic radii
         # Initialize MPI
@@ -154,14 +74,6 @@ class MapGenerator:
         # Create solver instance
         solver = DiffusionSolver(comm)
 
-        # Create solver parameters
-        params = SolverParameters(filename="square_one_hole", cmro2=self.cmro2, Pves=self.pvessel, Rves=self.Rves, R0=self.R0)
-        
-        # Define holes
-        holes = [
-            HoleGeometry(center=(*self.center, 0), radius_ves=self.Rves, radius_0=self.R0, marker=3),
-            ]
-        
         # Generate mesh
         solver.generate_mesh(holes)
         
@@ -181,8 +93,6 @@ class MapGenerator:
         # Create observation grid points
         x_obs = self.X[0] - self.X[0].mean()
         y_obs = self.Y[:,0] - self.Y[:,0].mean()
-        
-        
 
         # Create simulation grid
         x_idx_domain = solver.interpolation_grid(x, x_obs)

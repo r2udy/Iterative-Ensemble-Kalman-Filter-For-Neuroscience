@@ -24,7 +24,6 @@ class HoleGeometry:
         self.Pves = Pves
         self.marker = marker
 
-
 class DiffusionSolver:
     """Solves nonlinear diffusion problem with multiple holes"""
     
@@ -39,7 +38,7 @@ class DiffusionSolver:
         self.alpha = 1.39e-15
         self.cmro2_by_M = (60 * self.D * self.alpha * 1e12)
     
-    def generate_mesh(self, holes, domain_size=600.0, element_size=5.0, refined_size=2.0):
+    def generate_mesh(self, holes, domain_size=600.0, element_size=12.0, refined_size=2.0):
         """
         Generate a 2D mesh with circular holes.
         Outer domain boundary is NOT tagged; only holes are tagged.
@@ -70,28 +69,28 @@ class DiffusionSolver:
         model.addPhysicalGroup(2, [main_surface], 1)
 
         # Identify boundaries
-        curves = model.getBoundary(domain_with_holes, combined=False, oriented=False)
+        boundary_curves = model.getBoundary(domain_with_holes, combined=False, oriented=False)
 
         # Tag only hole boundaries
-        boundaries = {hole.marker: [] for hole in holes}
-        for dim, tag in curves:
+        hole_boundary_curves = {hole.marker: [] for hole in holes}
+        for dim, tag in boundary_curves:
             x, y, _ = gmsh.model.occ.getCenterOfMass(dim, tag)
             for hole in holes:
                 if (x - hole.center[0])**2 + (y - hole.center[1])**2 < (hole.radius_ves * 0.5)**2:
-                    boundaries[hole.marker].append(tag)
+                    hole_boundary_curves[hole.marker].append(tag)
                     break
             # If not near any hole, do NOT tag (outer boundary ignored)
 
         # Create physical groups for holes
         for hole in holes:
-            if len(boundaries[hole.marker]) == 0:
+            if len(hole_boundary_curves[hole.marker]) == 0:
                 print(f" Warning: No boundary found for hole marker {hole.marker}")
-            model.addPhysicalGroup(1, boundaries[hole.marker], hole.marker)
-
+            model.addPhysicalGroup(1, hole_boundary_curves[hole.marker], hole.marker)
+        
         # Mesh refinement near holes
         gmsh.model.mesh.field.add("Distance", 1)
         gmsh.model.mesh.field.setNumbers(1, "EdgesList",
-                                        [tag for hole in holes for tag in boundaries[hole.marker]])
+            [tag for hole in holes for tag in hole_boundary_curves[hole.marker]])
 
         gmsh.model.mesh.field.add("Threshold", 2)
         gmsh.model.mesh.field.setNumber(2, "InField", 1)
@@ -138,71 +137,17 @@ class DiffusionSolver:
             except KeyError:
                 pass
 
-        # Plot Dirichlet boundaries (hole boundaries)
-        plot_facets_by_marker(self.params.marker, "blue", f"Hole1 Dirichlet (marker {self.params.marker})")
-
         # Ring Neumann boundaries (from setup_circular_neumann_bcs)
-        for hole in holes:
+        for i, hole in enumerate(holes):
+            # Plot Dirichlet boundaries
+            plot_facets_by_marker(hole.marker, "blue", f"Hole{i} Dirichlet (marker {hole.marker})")
+
+            # Plot Neumann boundaries
             marker = 100 + hole.marker
             plot_facets_by_marker(marker, "red", f"Neumann Ring (marker {marker})")
 
         plotter.add_legend()
         plotter.show()
-
-    
-    def assign_M_on_vertices(self, holes, default_cmro2=None):
-        """
-        Fill self.M_func at mesh vertices:
-        - For each hole, convert hole.cmro2 (if provided) into M and add it on vertices
-        with Rves < dist < R0.
-        - If hole.cmro2 is None, use default_cmro2 (if provided) else 0.0.
-        """
-        # Ensure M_func exists and V exists
-        if not hasattr(self, "V"):
-            raise RuntimeError("Function space self.V must be created before calling assign_M_on_vertices.")
-        if not hasattr(self, "M_func") or self.M_func is None:
-            self.M_func = fem.Function(self.V)
-
-        coords = self.domain.geometry.x  # (N_total, gdim) (includes ghost)
-        xy = coords[:, :2]
-
-        # Prepare local array (length = number of local dofs / vertices in the Function)
-        M_local = np.zeros_like(self.M_func.x.array, dtype=float)
-
-        for hole in holes:
-            # handle tuple or None robustly
-            cmro2_val = hole.cmro2
-            if isinstance(cmro2_val, tuple):
-                cmro2_val = cmro2_val[0] if len(cmro2_val) > 0 else None
-            if cmro2_val is None:
-                cmro2_val = default_cmro2
-
-            if cmro2_val is None:
-                # nothing to add for this hole
-                continue
-
-            # convert cmro2 -> M using same formula you used before
-            M_val = cmro2_val / (60.0 * self.D * self.alpha * 1e12)
-
-            center = np.asarray(hole.center[:2])
-            dx = xy[:, 0] - center[0]
-            dy = xy[:, 1] - center[1]
-            dist = np.sqrt(dx * dx + dy * dy)
-
-            mask = (dist > hole.radius_ves) & (dist < hole.radius_0)
-            M_local[mask] += M_val
-
-        # write back and update ghosts
-        self.M_func.x.array[:] = M_local
-        # update ghost values (PETSc)
-        try:
-            self.M_func.vector.ghostUpdate(addv=PETSc.InsertMode.INSERT)
-        except Exception:
-            # fallback for older dolfinx versions
-            try:
-                self.M_func.x.scatter_forward()
-            except Exception:
-                pass
 
     def setup_problem(self, params, holes):
         """Set up the finite element problem"""
@@ -217,12 +162,11 @@ class DiffusionSolver:
         # Solution and test functions
         self.uh = fem.Function(self.V)
         self.v = ufl.TestFunction(self.V)
-        
+                
         # Initialize M function
         self.M_func = fem.Function(self.V)
 
         for hole in holes:
-            
             domain = self.domain
             tdim = domain.topology.dim
             fdim = tdim - 1
@@ -230,11 +174,10 @@ class DiffusionSolver:
             domain.topology.create_connectivity(fdim, 0)  # Needed to get vertices of each facet
             x = domain.geometry.x  # Nodal coordinates
             
-            
             inner_facets = []
             inner_values = []
             num_facets = domain.topology.index_map(fdim).size_local # Get all local facets
-
+            
             center=hole.center
             Rves = hole.radius_ves
             R0 = hole.radius_0
@@ -275,6 +218,7 @@ class DiffusionSolver:
         self.F = ufl.dot(ufl.grad(self.uh), ufl.grad(self.v)) * ufl.dx - \
                 self.M_func * self.v * ufl.dx
 
+        # Dirichlet boundary conditions
         # Add Neumann terms to weak form
         self.F += sum(
             ufl.inner(ufl.grad(self.uh), self.v * ufl.FacetNormal(self.domain)) * ufl.ds( 
@@ -282,9 +226,9 @@ class DiffusionSolver:
                 subdomain_id=100+hole.marker)
                 for hole in holes
         )
-        
+
     def setup_dirichlet_bcs(self, holes):
-        """Configure Dirichlet boundary conditions"""
+        """Configure Dirichlet boundary conditions"""  
         self.bcs = []
         
         for hole in holes:
@@ -301,9 +245,9 @@ class DiffusionSolver:
 
             # create a simple function equal to Pves on the boundary
             uD = fem.Function(self.V) # Create boundary functions      
-
-            # Boundary expressions
             def uD_expr(x, hole=hole, P=hole.Pves):
+                # x is a numpy array shape (gdim, npoints)
+                # return 1D array of values
                 dx = x[0] - hole.center[0]
                 dy = x[1] - hole.center[1]
                 r = np.sqrt(dx**2 + dy**2)
@@ -313,22 +257,21 @@ class DiffusionSolver:
             uD.interpolate(uD_expr)
             
             # Locate boundary dofs
-            facets = np.where(self.facet_tags.values == self.params.marker)[0]
+            facets = np.where(self.facet_tags.values == hole.marker)[0]
             
             dofs = fem.locate_dofs_topological(
                 self.V, self.domain.topology.dim-1, 
                 self.facet_tags.indices[facets]
             )
-            
-            # Create BCs
+
             self.bcs.append(fem.dirichletbc(uD, dofs)) # Create BCs
-            
+
     def setup_neumann_bcs(self, holes):
         """Set up no-flux boundary conditions on circles around holes"""
         domain = self.domain
         tdim = domain.topology.dim
         fdim = tdim - 1
-        tolerance = 1.1
+        tolerance = 1.8
         domain.topology.create_connectivity(fdim, 0)  # Needed to get vertices of each facet
         num_facets = domain.topology.index_map(fdim).size_local # Get all local facets
 
@@ -380,7 +323,7 @@ class DiffusionSolver:
             idx_list.append(closest_idx)
         
         return np.array(idx_list)
-    
+
     def solve(self):
         """Solve the nonlinear problem"""
         problem = NonlinearProblem(self.F, self.uh, bcs=self.bcs)
@@ -421,7 +364,7 @@ class DiffusionSolver:
         if not converged:
             raise RuntimeError(f"Solver failed to converge in {n} iterations")
         return converged
-        
+
     def save_results(self, filename):
         """Save solution to XDMF file"""
         
@@ -442,25 +385,24 @@ class DiffusionSolver:
 
 class SolverParameters:
     """Container for solver parameters"""
-    def __init__(self, filename, cmro2, Pves, Rves, R0, marker=3):
+    def __init__(self, filename, marker=3):
         self.path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/"
         self.filename = filename
         self.marker = marker
-
 
 def main():
     # Initialize MPI
     comm = MPI.COMM_WORLD
     
     # Create solver parameters
-    params = SolverParameters(filename="square_one_hole_id0_test", cmro2=2., Pves=80., Rves=10., R0=100.)
+    params = SolverParameters(filename="square_one_hole_id0_test")
     
     # Create solver instance
     solver = DiffusionSolver(comm)
     
     # Hole 1:
     cmro2_1     = 1.5
-    Pves_1      = 60.
+    Pves_1      = 80.
     Rves_1      = 10.
     R0_1        = 100.
 
@@ -470,10 +412,17 @@ def main():
     Rves_2      = 10.
     R0_2        = 80.
 
+    # Hole 3:
+    cmro2_3     = .5
+    Pves_3      = 40.
+    Rves_3      = 10.
+    R0_3        = 80.
+
     # Define holes
     holes = [
         HoleGeometry(center=(0., 0., 0.), cmro2=cmro2_1, Pves=Pves_1, radius_ves=Rves_1, radius_0=R0_1, marker=params.marker),
         HoleGeometry(center=(-150., -150., 0.), cmro2=cmro2_2, Pves=Pves_2, radius_ves=Rves_2, radius_0=R0_2, marker=params.marker + 1),
+        HoleGeometry(center=(150., 150., 0.), cmro2=cmro2_3, Pves=Pves_3, radius_ves=Rves_3, radius_0=R0_3, marker=params.marker + 2)
         ]
     
     # Generate mesh
