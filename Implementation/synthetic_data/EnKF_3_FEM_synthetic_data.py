@@ -134,14 +134,14 @@ for i, cmro2_true in enumerate(cmro2_true_values):
     profile_main = generator.pO2_array.reshape((grid_size, grid_size), order='F')
 
     # Second vessel
-    pvessel2 = (profile_main.max() - profile_main.min())/2
-    center_secondary = (-130.0, -130.0)
+    pvessel2 = (profile_main.max() - profile_main.min())
+    center_secondary = (-150.0, -150.0)
     generator2 = MapGenerator(
         cmro2=2.,
         pvessel=pvessel2,
         Rves=10.,
-        R0=80.,
-        Rt=80.,
+        R0=60.,
+        Rt=60.,
         X=X,
         Y=Y,
         center=center_secondary)
@@ -156,17 +156,17 @@ for i, cmro2_true in enumerate(cmro2_true_values):
     obs_perturbated = true_obs.flatten() + np.random.normal(np.zeros(true_obs.flatten().shape[0]), scale=sigma) + offset_random
     obs_perturbated_array = obs_perturbated.reshape((grid_size, grid_size), order='F')
 
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(projection='3d')
-    sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
-    ax.plot_surface(X, Y, true_obs, cmap='plasma', alpha=0.6, edgecolor='none')
-    ax.plot_surface(X, Y, profile_secondary, cmap='viridis', edgecolor='none')
-    ax.set_xlabel('X (nm)')
-    ax.set_ylabel('Y (nm)')
-    ax.set_zlabel('pO2 (mmHg)')
-    plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
-    ax.set_title(f'Synthetic pO2 Data with Noise\n offset: {offset_random[0]}')
-    plt.show()
+    # fig = plt.figure(figsize=(12, 8))
+    # ax = fig.add_subplot(projection='3d')
+    # sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
+    # ax.plot_surface(X, Y, true_obs, cmap='plasma', alpha=0.6, edgecolor='none')
+    # ax.plot_surface(X, Y, profile_secondary, cmap='viridis', edgecolor='none')
+    # ax.set_xlabel('X (nm)')
+    # ax.set_ylabel('Y (nm)')
+    # ax.set_zlabel('pO2 (mmHg)')
+    # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
+    # ax.set_title(f'Synthetic pO2 Data with Noise\n offset: {offset_random[0]}')
+    # plt.show()
 
     # Find Geometric parameters such as Rves and R0
     analyzer = Po2Analyzer(obs_perturbated_array, X, Y)

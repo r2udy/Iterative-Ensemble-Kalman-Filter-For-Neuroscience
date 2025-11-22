@@ -30,7 +30,7 @@ from sklearn.mixture import GaussianMixture
 
 # ---------------------------
 # Save generated data
-filename = "mulitple_sources"
+filename = "mulitple_sources_R0"
 
 # ---------------------------
 # Load generated data
@@ -58,7 +58,7 @@ labels_true = np.abs(df_meta['cmro2'].values-3).astype(int)
 # ---------------------------
 # Run KMeans
 # ---------------------------
-n_clusters = 3
+n_clusters = 4
 kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
 labels = kmeans.fit_predict(X_scaled)
 

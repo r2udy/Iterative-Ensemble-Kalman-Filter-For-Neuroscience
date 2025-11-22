@@ -1,0 +1,53 @@
+# Synthetic Data
+N = 75
+D = 4.0e3
+alpha = 1.39e-15
+Gaussian White noise: sigma=2.
+
+filename = "mulitple_sources"
+
+# number of samples per cmro2 value (150 * 3 = 450 total)
+bank_cmro2 = np.array([1., 2., 3])
+
+# First vessel
+pvessel_true = 80.0
+pvessel_uncertainty = 5.0
+
+Rves_true = 10.
+Rves_uncertainty = 1.
+
+R0_true=100.
+R0_uncertainty = 10.
+
+# Hole 1: (j<n_per_cmro2//3)
+cmro2_1     = cmro2_sampled
+Pves_1      = pvessel_sampled
+Rves_1      = Rves_sampled
+R0_1        = R0_value
+center_1    = (0., 0., 0.)
+
+# Hole 2: (j>=n_per_cmro2//2 and j<2*n_per_cmro2//3)
+cmro2_2     = .5
+Pves_2      = pvessel_sampled * 0.8
+Rves_2      = 10.
+R0_2        = 120.
+position_x  = np.random.uniform(-170, -130)
+position_y  = np.random.uniform(-170, -130)
+center_2    = (position_x, position_y, 0.)
+
+# Hole 3: (j>2*n_per_cmro2//3)
+cmro2_3     = .5
+Pves_3      = pvessel_sampled * 0.8
+Rves_3      = 10.
+R0_3        = 120.
+position_x  = np.random.uniform(170, 130)
+position_y  = np.random.uniform(-170, 170)
+center_3    = (position_x, position_x, 0.)
+
+# Finite Element Method
+Library: FEniCS
+Mesh center: (0, 0, 0)
+Mesh size: 200x200
+
+# Coordinates
+X, Y = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))

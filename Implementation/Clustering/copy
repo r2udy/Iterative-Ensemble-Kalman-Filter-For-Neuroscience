@@ -14,25 +14,9 @@ sys.path.append(os.path.abspath(py_file_location))
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import gaussian_kde
-from scipy.ndimage import gaussian_filter
 import EnKF_FEM
-from FEM_code.generateMesh_Solver_multiple_holes import DiffusionSolver, SolverParameters, HoleGeometry
+from FEM_code.generateMesh_Solver_multiple_holes import SolverParameters, HoleGeometry
 from MapGenerator import MapGenerator
-
-
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
-from sklearn.preprocessing import StandardScaler
-from sklearn import metrics
-from sklearn.metrics import adjusted_rand_score
-
-from scipy.cluster.hierarchy import dendrogram, linkage
-from sklearn.cluster import AgglomerativeClustering
-
-from sklearn.mixture import GaussianMixture
-
 
 
 def generate_synthetic_po2_maps():
@@ -41,10 +25,11 @@ def generate_synthetic_po2_maps():
     # ---------------------------
     grid_size = 20
     n_cells = grid_size * grid_size
-    n_per_cmro2 = 15              # number of samples per cmro2 value (150 * 3 = 75 total)
-    bank_cmro2 = np.array([1., 2., 3.])
+    n_per_cmro2 = 2              # number of samples per cmro2 value (150 * 3 = 75 total)
+    bank_cmro2 = np.array([1, 2., 3.])
     X_axis, Y_axis = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
     sigma = 2.0
+    length_scale_range = (2.0, 5.0)  # vary length scale to add map diversity
 
     # container for maps and metadata
     maps = []           # will hold (n_maps, grid_size, grid_size)
@@ -58,15 +43,15 @@ def generate_synthetic_po2_maps():
         pvessel_true = 60.0
         pvessel_uncertainty = 5.0
 
-        Rves_true = 10.
-        Rves_uncertainty = 1.
+        Rves_true = 11.
+        pvessel_uncertainty = 1.
 
         R0_true=100.
-        R0_uncertainty = 1.
+        R0_uncertainty = 10.
 
         # draw perturbed parameter lists (n_per_cmro2 samples each)
         bank_pvessel_pertubed   = pvessel_true + np.random.normal(0, pvessel_uncertainty, size=n_per_cmro2)
-        bank_Rves_pertubated    = Rves_true + np.random.normal(0, Rves_uncertainty, size=n_per_cmro2)
+        bank_Rves_pertubated    = Rves_true + np.random.normal(0, pvessel_uncertainty, size=n_per_cmro2)
         bank_R0_pertubed        = R0_true + np.random.normal(0, R0_uncertainty, size=n_per_cmro2)
 
         for j, (pvessel_sampled, Rves_sampled, R0_sampled) in enumerate(zip(bank_pvessel_pertubed, bank_Rves_pertubated, bank_R0_pertubed)):
@@ -178,9 +163,10 @@ def generate_synthetic_po2_maps():
                     "capilary_2": center_3
                 })
             
+            obs_perturbated_array = profile_perturbed.reshape((grid_size, grid_size), order='F')
+
             # fig = plt.figure(figsize=(12, 8))
             # ax = fig.add_subplot(projection='3d')
-            # obs_perturbated_array = profile_perturbed.reshape((grid_size, grid_size), order='F')
             # sc = ax.plot_surface(X_axis, Y_axis, obs_perturbated_array, cmap='viridis', edgecolor='none')
             # ax.set_xlabel('X (nm)')
             # ax.set_ylabel('Y (nm)')
@@ -188,6 +174,7 @@ def generate_synthetic_po2_maps():
             # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
             # ax.set_title(f'Synthetic pO2 Data with Noise | cmro2={cmro2_value}')
             # plt.show()
+            # break
 
     maps = np.array(maps)  # shape (n_maps, 20, 20)
     df_meta = pd.DataFrame(meta)
@@ -210,9 +197,5 @@ if __name__ == "__main__":
     maps, df_meta = generate_synthetic_po2_maps()
 
     # Save generated data
-    filename = "mulitple_sources_test"
+    filename = "mulitple_sources_bis"
     save_synthetic_data(maps, df_meta, filename)
-
-    # ---------------------------
-    # Load generated data
-    maps, df_meta = load_synthetic_data(filename)
