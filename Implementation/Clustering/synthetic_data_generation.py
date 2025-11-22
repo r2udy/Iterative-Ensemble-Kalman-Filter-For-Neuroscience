@@ -42,7 +42,7 @@ def generate_synthetic_po2_maps():
     grid_size = 20
     n_cells = grid_size * grid_size
     n_per_cmro2 = 15              # number of samples per cmro2 value (150 * 3 = 75 total)
-    bank_cmro2 = np.array([1., 2., 3.])
+    bank_R0 = np.array([80., 100., 120.])
     X_axis, Y_axis = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
     sigma = 2.0
 
@@ -53,31 +53,30 @@ def generate_synthetic_po2_maps():
     # ---------------------------
     # Build synthetic bank
     # ---------------------------
-    for i, cmro2_value in enumerate(bank_cmro2):
+    for i, R0_value in enumerate(bank_R0):
         # First vessel
-        pvessel_true = 60.0
-        pvessel_uncertainty = 5.0
+        pvessel_true = 80.0
+        pvessel_uncertainty = 2.0
 
         Rves_true = 10.
         Rves_uncertainty = 1.
 
-        R0_true=100.
-        R0_uncertainty = 1.
+        cmro2_true = 1.5
+        cmro2_uncertainty = .2
 
         # draw perturbed parameter lists (n_per_cmro2 samples each)
         bank_pvessel_pertubed   = pvessel_true + np.random.normal(0, pvessel_uncertainty, size=n_per_cmro2)
         bank_Rves_pertubated    = Rves_true + np.random.normal(0, Rves_uncertainty, size=n_per_cmro2)
-        bank_R0_pertubed        = R0_true + np.random.normal(0, R0_uncertainty, size=n_per_cmro2)
+        # bank_R0_pertubed        = R0_true + np.random.normal(0, R0_uncertainty, size=n_per_cmro2)
+        bank_cmro2_pertubed        = cmro2_true + np.random.normal(0, cmro2_uncertainty, size=n_per_cmro2)
 
-        for j, (pvessel_sampled, Rves_sampled, R0_sampled) in enumerate(zip(bank_pvessel_pertubed, bank_Rves_pertubated, bank_R0_pertubed)):
-            print(f"Maps {j+1 + i*n_per_cmro2} / {n_per_cmro2 * len(bank_cmro2)}")
-            # print(f"Vascular Characteristic Sampled Values:")
-            # print(f"cmro2: {cmro2_value:.2f}, pvessel_sampled: {pvessel_sampled:.2f}, R0_sampled: {R0_sampled:.2f}")
+        for j, (pvessel_sampled, Rves_sampled, cmro2_sampled) in enumerate(zip(bank_pvessel_pertubed, bank_Rves_pertubated, bank_cmro2_pertubed)):
+            print(f"Maps {j+1 + i*n_per_cmro2} / {n_per_cmro2 * len(bank_R0)}")
             # Hole 1:
-            cmro2_1     = cmro2_value
+            cmro2_1     = cmro2_sampled
             Pves_1      = pvessel_sampled
             Rves_1      = Rves_sampled
-            R0_1        = R0_sampled
+            R0_1        = R0_value
             center_1    = (0., 0., 0.)
 
             # Hole 2:
@@ -130,10 +129,10 @@ def generate_synthetic_po2_maps():
                 maps.append(profile_perturbed.copy())
                 meta.append({
                     "maps": profile_perturbed,
-                    "cmro2": cmro2_value,
+                    "cmro2": cmro2_sampled,
                     "pvessel_sampled": pvessel_sampled,
                     "Rves_sampled": Rves_sampled,
-                    "R0_sampled": R0_sampled,
+                    "R0_sampled": R0_value,
                     "capilary_1": None,
                     "capilary_2": None
                 })
@@ -150,10 +149,10 @@ def generate_synthetic_po2_maps():
                 maps.append(profile_perturbed.copy())
                 meta.append({
                     "maps": profile_perturbed,
-                    "cmro2": cmro2_value,
+                    "cmro2": cmro2_sampled,
                     "pvessel_sampled": pvessel_sampled,
                     "Rves_sampled": Rves_sampled,
-                    "R0_sampled": R0_sampled,
+                    "R0_sampled": R0_value,
                     "capilary_1": center_2,
                     "capilary_2": None
                 })
@@ -170,10 +169,10 @@ def generate_synthetic_po2_maps():
                 maps.append(profile_perturbed.copy())
                 meta.append({
                     "maps": profile_perturbed,
-                    "cmro2": cmro2_value,
+                    "cmro2": cmro2_sampled,
                     "pvessel_sampled": pvessel_sampled,
                     "Rves_sampled": Rves_sampled,
-                    "R0_sampled": R0_sampled,
+                    "R0_sampled": R0_value,
                     "capilary_1": center_2,
                     "capilary_2": center_3
                 })
@@ -210,7 +209,7 @@ if __name__ == "__main__":
     maps, df_meta = generate_synthetic_po2_maps()
 
     # Save generated data
-    filename = "mulitple_sources_test"
+    filename = "mulitple_sources_R0"
     save_synthetic_data(maps, df_meta, filename)
 
     # ---------------------------
