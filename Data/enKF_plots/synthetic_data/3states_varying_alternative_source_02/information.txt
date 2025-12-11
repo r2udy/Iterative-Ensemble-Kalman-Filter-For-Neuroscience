@@ -21,7 +21,7 @@ Gaussian White noise: sigma=2.
 
 # Alternative source
 center = (-150, -150)
-cmro2=2.
+cmro2=2.0 x 4 times
 pvessel=(profile_main.max() - profile_main.min())
 Rves=10.
 R0=60.

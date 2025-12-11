@@ -1,0 +1,51 @@
+running command: run_enkf 16 EnKF_3_FEM_synthetic_data.py
+Model: FEM -> confounded radii R_0 and R_t
+data = [32] * 7
+State: [M, R0, pvessel]
+n_ensembles = 50
+obs_dim = 400
+D = 4.0e3
+alpha = 1.39e-15
+
+# Initial guess: Uniform distribution for cmro2
+cmro2_lower, cmro2_upper = 1.0, 3.0
+cmro2_mean_inital = 0.5 * (cmro2_lower + cmro2_upper)
+cmro2_var_initial = 1.  # 99.7% within [lower, upper]
+cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12.0  # Uniform distribution variance
+M_var = cmro2_var / cmro2_by_M**2  # model uncertainty scaled
+
+# Initial guess: Uniform distribution for R0
+R0_lower, R0_upper = 70., 100.
+R0_mean_initial = 0.5 * (R0_lower + R0_upper)
+R0_var_initial = 5.**2 # 99.7% within [lower, upper]
+R0_var = 10.**2 # prior uncertainty of capillary-free space radius
+
+# Initial guess: Uniform distribution for R0
+pvessel_lower, pvessel_upper = 40., 55.
+pvessel_mean_initial = 0.5 * (pvessel_lower + pvessel_upper)
+pvessel_var_initial = ((pvessel_upper - pvessel_lower) / 6.0)**2  # 99.7% within [lower, upper]
+pvessel_var = 5.0**2 # prior uncertainty of Neumann boundary condition
+
+# Covariance matrix
+M_var = cmro2_var / cmro2_by_M**2 / 12 = 0.33
+R0_var = 5.**2
+pvessel_var = 3.**2
+obs_var_constant = 5.**2
+B   = np.array([[M_var,    0.0,        0.0],
+                [0.0,      R0_var,     0.0],
+                [0.0,   0.0,           pvessel_var]])   # Background covariance matrix
+R = obs_var_constant * I(obs_dim, obs_dim) # 
+
+# Ensemble Initialization
+Distribution: Gaussian
+a = np.array([cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial])
+b = np.array([cmro2_var_initial / (cmro2_by_M)**2,  R0_var_initial,  pvessel_var_initial])
+
+
+# Finite Element Method
+Library: FEniCS
+Mesh center: (0, 0, 0)
+Mesh size: 600(300x300)
+
+# Coordinates
+X_axis, Y_axis = from the data

@@ -13,27 +13,9 @@ sys.path.append(os.path.abspath(py_file_location))
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.stats import gaussian_kde
-from scipy.ndimage import gaussian_filter
 import EnKF_FEM
-from FEM_code.generateMesh_Solver_multiple_holes import DiffusionSolver, SolverParameters, HoleGeometry
+from FEM_code.generateMesh_Solver_multiple_holes import SolverParameters, HoleGeometry
 from MapGenerator import MapGenerator
-
-
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
-from sklearn.preprocessing import StandardScaler
-from sklearn import metrics
-from sklearn.metrics import adjusted_rand_score
-
-from scipy.cluster.hierarchy import dendrogram, linkage
-from sklearn.cluster import AgglomerativeClustering
-
-from sklearn.mixture import GaussianMixture
-
-
 
 def generate_synthetic_po2_maps():
     # ---------------------------
@@ -129,10 +111,10 @@ def generate_synthetic_po2_maps():
                 maps.append(profile_perturbed.copy())
                 meta.append({
                     "maps": profile_perturbed,
-                    "cmro2": cmro2_sampled,
+                    "cmro2_sampled": cmro2_sampled,
                     "pvessel_sampled": pvessel_sampled,
                     "Rves_sampled": Rves_sampled,
-                    "R0_sampled": R0_value,
+                    "R0": R0_value,
                     "capilary_1": None,
                     "capilary_2": None
                 })
@@ -149,10 +131,10 @@ def generate_synthetic_po2_maps():
                 maps.append(profile_perturbed.copy())
                 meta.append({
                     "maps": profile_perturbed,
-                    "cmro2": cmro2_sampled,
+                    "cmro2_sampled": cmro2_sampled,
                     "pvessel_sampled": pvessel_sampled,
                     "Rves_sampled": Rves_sampled,
-                    "R0_sampled": R0_value,
+                    "R0": R0_value,
                     "capilary_1": center_2,
                     "capilary_2": None
                 })
@@ -169,10 +151,10 @@ def generate_synthetic_po2_maps():
                 maps.append(profile_perturbed.copy())
                 meta.append({
                     "maps": profile_perturbed,
-                    "cmro2": cmro2_sampled,
+                    "cmro2_sampled": cmro2_sampled,
                     "pvessel_sampled": pvessel_sampled,
                     "Rves_sampled": Rves_sampled,
-                    "R0_sampled": R0_value,
+                    "R0": R0_value,
                     "capilary_1": center_2,
                     "capilary_2": center_3
                 })
@@ -210,8 +192,8 @@ if __name__ == "__main__":
 
     # Save generated data
     filename = "mulitple_sources_R0"
-    save_synthetic_data(maps, df_meta, filename)
+    # save_synthetic_data(maps, df_meta, filename)
 
     # ---------------------------
     # Load generated data
-    maps, df_meta = load_synthetic_data(filename)
+    # maps, df_meta = load_synthetic_data(filename)

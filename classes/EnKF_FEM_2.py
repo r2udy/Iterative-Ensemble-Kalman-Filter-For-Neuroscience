@@ -136,7 +136,7 @@ class EnKF:
                                 )
         # Define holes
         holes = [
-            HoleGeometry(center=(*center, 0), radius_ves=params.Rves, radius_0=params.R0, marker=3),
+            HoleGeometry(center=(*center, 0), cmro2=cmro2, Pves=Pves, radius_ves=Rves, radius_0=R0, marker=3),
             ]
         
         # Generate mesh

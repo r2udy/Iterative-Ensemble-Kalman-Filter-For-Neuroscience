@@ -27,11 +27,9 @@ class Po2Analyzer:
         # Input fields
         self.pO2_value = pO2_array
         self.sigma = 2.0  # Gaussian smoothing
-        self.smooth_data = gaussian_filter(self.pO2_value, sigma=self.sigma)
 
         self.rows, self.cols = self.pO2_value.shape
         self.X, self.Y = X, Y  # physical coordinates
-        self.p_vessel = np.max(self.smooth_data)  # vessel pO2
 
         # Gradient magnitude
         self.Gx, self.Gy = np.gradient(self.pO2_value)
@@ -43,32 +41,7 @@ class Po2Analyzer:
         - Inner circle = circle with maximum average pO2 along circumference.
         - Outer circle = circle with minimum average pO2 along circumference.
         """
-        # Center = maximum pO₂ location
-        i_center, j_center = self.smooth_data.shape[0] // 2, self.smooth_data.shape[1] // 2
-        win_size = 5  # half-width of search window
-
-        # Define search window around center
-        row_min, row_max = max(i_center - win_size, 0), min(i_center + win_size + 1, self.smooth_data.shape[0])
-        col_min, col_max = max(j_center - win_size, 0), min(j_center + win_size + 1, self.smooth_data.shape[1])
-
-        # Restrict to local window
-        local_window = self.smooth_data[row_min:row_max, col_min:col_max]
-
-        # local maximum inside the window
-        local_imax, local_jmax = np.unravel_index(np.argmax(local_window), local_window.shape)
-        imax = local_imax + row_min
-        jmax = local_jmax + col_min
-
-        if np.abs(imax - jmax) > 3:
-            print("Warning: Center is not near the diagonal!")
-            # fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-            # c = ax.pcolormesh(self.X, self.Y, self.pO2_value, shading='auto', cmap='jet')
-            # fig.colorbar(c, label='pO₂')
-            # ax.set_title(f"Radial pO₂ Map of the ensemble member | Center at ({self.X[jmax, imax]:.1f}, {self.Y[jmax, imax]:.1f})")
-            # ax.set_xlabel('X (pixels)')
-            # ax.set_ylabel('Y (pixels)')
-            # ax.axis('equal')
-            # plt.show()
+        imax, jmax = np.unravel_index(np.argmax(self.pO2_value.flatten()), self.pO2_value.shape)
         cx, cy = self.X[jmax, imax], self.Y[jmax, imax]
         self.center = (cx, cy)
         self.center_ij = (imax, jmax)
@@ -85,7 +58,7 @@ class Po2Analyzer:
             tol = 2 # thickness of ring
             mask_ring = (self.R >= r - tol) & (self.R <= r + tol)
             if np.any(mask_ring):
-                avg_val = np.mean(self.smooth_data[mask_ring])
+                avg_val = np.mean(self.pO2_value[mask_ring])
                 avg_grad = np.mean(self.Gmag[mask_ring])
                 circ_stats.append((r, avg_val, avg_grad))
 
@@ -100,7 +73,3 @@ class Po2Analyzer:
 
         self.rin = r_in
         self.rout = r_out
-
-        # Masks for visualization
-        self.mask_inner = self.R <= r_in
-        self.mask_outer = self.R <= r_out

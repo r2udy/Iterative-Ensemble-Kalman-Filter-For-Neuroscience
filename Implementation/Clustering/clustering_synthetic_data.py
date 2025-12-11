@@ -14,6 +14,7 @@ sys.path.append(os.path.abspath(py_file_location))
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import pylab as P
 from synthetic_data_generation import load_synthetic_data
 
 from sklearn.decomposition import PCA
@@ -54,11 +55,11 @@ pca = PCA(n_components=5)
 X_pca = pca.fit_transform(X_scaled)
 # Use X_pca for clustering if used
 
-labels_true = np.abs(df_meta['cmro2'].values-3).astype(int)
+labels_true = np.abs(df_meta['R0'].values-3).astype(int)
 # ---------------------------
 # Run KMeans
 # ---------------------------
-n_clusters = 4
+n_clusters = 3
 kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=20)
 labels = kmeans.fit_predict(X_scaled)
 
@@ -92,7 +93,7 @@ axes = axes.flatten()
 for i0, i in enumerate(maps_examples_indexes):
     ax = axes[i0]
     ax.imshow(maps[i].reshape(grid_size, grid_size), cmap='viridis', origin='lower')
-    ax.set_title(f"idx={i}, c={labels[i]}, cmro2={df_meta.loc[i,'cmro2']}")
+    ax.set_title(f"idx={i}, c={labels[i]}, R0={df_meta.loc[i,'R0']}")
     ax.axis('off')
 plt.suptitle("15 synthetic maps with cluster labels")
 plt.tight_layout()
@@ -252,13 +253,12 @@ print("Davies-Bouldin Index:", dbi)
 print("Calinski-Harabasz Score:", ch)
 
 
-
 # ------------------------------------
 # Gaussian Mixture Model Clustering
 # ------------------------------------
 
 # Data
-X = X_scaled 
+X = X_scaled
 
 # Fit GMM
 gmm = GaussianMixture(n_components=3, covariance_type='full', random_state=42)
@@ -266,9 +266,6 @@ gmm.fit(X)
 
 # Predict cluster labels
 labels_gmm = gmm.predict(X)
-
-probabilities = gmm.predict_proba(X)
-print("Probabilities of belonging to each component:\n", probabilities)
 
 # Plot GMM clustering results
 plt.figure(figsize=(8, 6))
@@ -283,9 +280,9 @@ print("Running GMM clustering...")
 print(15*"-")
 # Score (quality metric): How well-separated are the clusters
 ground_truth_score = metrics.rand_score(labels_true, labels_gmm)  # within-c
-sil = silhouette_score(X_scaled, labels_gmm) # silhouette score: How well-separated are the clusters (higher is better)
-dbi = davies_bouldin_score(X_scaled, labels_gmm) # Davies-Bouldin Index: measures cluster separation (lower is better)
-ch = calinski_harabasz_score(X_scaled, labels_gmm) # Calinski-Harabasz Score: measures cluster tightness and separation (higher values indicate better-defined clusters)
+sil = silhouette_score(X_scaled, labels_gmm)        # silhouette score: How well-separated are the clusters (higher is better)
+dbi = davies_bouldin_score(X_scaled, labels_gmm)    # Davies-Bouldin Index: measures cluster separation (lower is better)
+ch = calinski_harabasz_score(X_scaled, labels_gmm)  # Calinski-Harabasz Score: measures cluster tightness and separation (higher values indicate better-defined clusters)
 print("Rand Index (against true cmro2 clusters):", ground_truth_score)
 print("Silhouette score:", sil)
 print("Davies-Bouldin Index:", dbi)

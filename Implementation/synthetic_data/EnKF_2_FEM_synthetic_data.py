@@ -20,6 +20,8 @@ from scipy.stats import gaussian_kde
 from scipy.ndimage import gaussian_filter
 from EnKF_FEM import build_obs_covariance_radial, build_obs_covariance_diagonal
 from EnKF_FEM_2 import EnKF
+from FEM_code.generateMesh_Solver_multiple_holes import DiffusionSolver, SolverParameters, HoleGeometry
+
 from circlesearch import Po2Analyzer
 from MapGenerator import MapGenerator
 from Po2Dataset import load_data
@@ -32,7 +34,7 @@ df_copy['pO2Value'] = df_copy['pO2Value'].apply(lambda x: x.flatten())
 df_copy.keys()
 uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 # --
-file_id_saving = "2states_varying_alternative_source_02"  # ID for saving the data
+file_id_saving = "2states_varying_exp_01"  # ID for saving the data
 
 # --------------------------
 # Constants initial #
@@ -42,12 +44,15 @@ cmro2_by_M = (60 * D * alpha * 1e12)
 grid_size = 20 # data size
 
 cmro2_lower, cmro2_upper = 1.0, 3.0
-R0_lower, R0_upper = 80., 120.
 cmro2_var = (cmro2_upper - cmro2_lower)**2 / 12 # variance of uniform distribution
 M_var = cmro2_var / cmro2_by_M**2 # model uncertainty scaled
+
+R0_lower, R0_upper = 80., 120.
 R0_var = 5.0**2 # prior uncertainty of caparilary-free space radius
+
 obs_var_constant = 5.**2   # constant uncertainty of measurements in the observation covariance matrix R
 sigma = 2.0  # noise level in synthetic data
+
 obs_var_high = 5.**2    # high uncertainty of measurements
 obs_var_low = 1.**2     # low uncertainty of measurements
 
@@ -56,7 +61,7 @@ obs_var_low = 1.**2     # low uncertainty of measurements
 # X = df_copy[mask]['pointsX'].tolist()[0]
 # Y = df_copy[mask]['pointsY'].tolist()[0]
 
-X, Y = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
+X_axis, Y_axis = np.meshgrid(np.linspace(-190, 190, 20), np.linspace(-190, 190, 20))
 
 # --------------------------
 # EnKF Parameters
@@ -100,89 +105,86 @@ means = []
 covs = []
 stats_overall = []
 corrections = []
-cmro2_true_values = np.linspace(1.0, 3.0, 3)
+cmro2_true_values = 2.0 * np.ones(4)
 state_ensembles = np.zeros((state_dim, len(cmro2_true_values), n_ensembles))
 
 
 # ------------------+ Synthetic Data +------------------ #
 for i, cmro2_true in enumerate(cmro2_true_values):
+
+    # Hole 1:
+    cmro2_1     = 2.0
+    Pves_1      = 80.
+    Rves_1      = 11.
+    R0_1        = 100.
+    center_1    = (0., 0., 0.)
+
+    # Hole 2:
+    cmro2_2     = .5
+    Pves_2      = Pves_1 * 0.8
+    Rves_2      = 5.
+    R0_2        = 80.
+    position_x  = np.random.uniform(-190, -130)
+    position_y  = np.random.uniform(-190, -130)
+    center_2    = (position_x, position_y, 0.)
+
+    # Hole 3:
+    cmro2_3     = .5
+    Pves_3      = Pves_1 * 0.8
+    Rves_3      = 5.
+    R0_3        = 80.
+    position_x  = np.random.uniform(190, 130)
+    position_y  = np.random.uniform(-190, 190)
+    center_3    = (position_x, position_x, 0.)
+
+    # Create solver parameters
+    params = SolverParameters(filename="square_holes")
+
+    # Define holes
+    holes1 = [
+        HoleGeometry(center=center_1, cmro2=cmro2_1, Pves=Pves_1, radius_ves=Rves_1, radius_0=R0_1),
+        ]
     
-    # First vessel
-    pvessel = 80.0
-    M = cmro2_true / cmro2_by_M
-    Rves = 11.
-    R0=100.
-    Rt=100.
+    holes2 = [
+        HoleGeometry(center=center_1, cmro2=cmro2_1, Pves=Pves_1, radius_ves=Rves_1, radius_0=R0_1, marker=params.marker),
+        HoleGeometry(center=center_2, cmro2=cmro2_2, Pves=Pves_2, radius_ves=Rves_2, radius_0=R0_2, marker=params.marker + 1),
+        ]
 
+    holes3 = [
+        HoleGeometry(center=center_1, cmro2=cmro2_1, Pves=Pves_1, radius_ves=Rves_1, radius_0=R0_1, marker=params.marker),
+        HoleGeometry(center=center_2, cmro2=cmro2_2, Pves=Pves_2, radius_ves=Rves_2, radius_0=R0_2, marker=params.marker + 1),
+        HoleGeometry(center=center_3, cmro2=cmro2_3, Pves=Pves_3, radius_ves=Rves_3, radius_0=R0_3, marker=params.marker + 2)
+        ]
+    
     generator = MapGenerator(
-        cmro2=cmro2_true,
-        pvessel=pvessel,
-        Rves=Rves,
-        R0=R0,
-        Rt=Rt,
-        X=X,
-        Y=Y)
-    profile_main = generator.pO2_array.reshape((grid_size, grid_size), order='F')
-
-    # Second vessel
-    pvessel2 = (profile_main.max() - profile_main.min())
-    center_secondary = (-150.0, -150.0)
-    generator2 = MapGenerator(
-        cmro2=2.,
-        pvessel=pvessel2,
-        Rves=10.,
-        R0=60.,
-        Rt=60.,
-        X=X,
-        Y=Y,
-        center=center_secondary)
-    profile_secondary = generator2.pO2_array.reshape((grid_size, grid_size), order='F')
-    profile_secondary = profile_secondary - profile_secondary.min()
-    profile_secondary[profile_secondary < 0.0] = 0.0
-    profile_secondary = gaussian_filter(profile_secondary.flatten(), sigma=2.).reshape((grid_size, grid_size), order='F')
-
-    # Add noise to the generated data
-    true_obs = profile_main + profile_secondary
-    offset_random = np.random.normal(0, 5.) * np.ones(true_obs.flatten().shape[0])
-    obs_perturbated = true_obs.flatten() + np.random.normal(np.zeros(true_obs.flatten().shape[0]), scale=sigma) + offset_random
+        holes=holes1,
+        params=params,
+        X=X_axis,
+        Y=Y_axis)
+    profile = generator.pO2_array
+    obs_perturbated = profile.flatten() + np.random.normal(np.zeros(grid_size*grid_size), scale=sigma)
     obs_perturbated_array = obs_perturbated.reshape((grid_size, grid_size), order='F')
 
     # fig = plt.figure(figsize=(12, 8))
     # ax = fig.add_subplot(projection='3d')
-    # sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
-    # ax.plot_surface(X, Y, true_obs, cmap='plasma', alpha=0.6, edgecolor='none')
-    # ax.plot_surface(X, Y, profile_secondary, cmap='viridis', edgecolor='none')
+    # sc = ax.plot_surface(X_axis, Y_axis, obs_perturbated_array, cmap='viridis', edgecolor='none')
+    # ax.plot_surface(X_axis, Y_axis, profile, cmap='plasma', alpha=0.6, edgecolor='none')
     # ax.set_xlabel('X (nm)')
     # ax.set_ylabel('Y (nm)')
     # ax.set_zlabel('pO2 (mmHg)')
     # plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='pO2 (mmHg)')
-    # ax.set_title(f'Synthetic pO2 Data with Noise\n offset: {offset_random[0]}')
+    # ax.set_title(f'Synthetic pO2 Data with Noise')
     # plt.show()
 
-    # Find Geometric parameters such as Rves and R0
-    analyzer = Po2Analyzer(obs_perturbated_array, X, Y)
-    analyzer.find_circles()
-    Rves_est = analyzer.rin
-    pvessel_est = analyzer.p_vessel
-    center = analyzer.center_ij
-    center_coordinates = analyzer.center
-    
+    # break
     # ----------------------+ EnKF +----------------------#
+    center = (0, 0)
     R = build_obs_covariance_radial(
     origin = center,
     obs_var_high = obs_var_high,
     obs_var_low = obs_var_low,
     mode='exponential'
     )
-
-    # R = build_obs_covariance_diagonal(
-    #     grid_size=grid_size,
-    #     origin=center,
-    #     angle_ranges=[angles_1, angles_2],
-    #     min_radius=min_radius,
-    #     obs_var_high=obs_var_high,
-    #     obs_var_low=obs_var_low
-    # )
 
     # R = obs_var_constant * np.eye(obs_dim) # Observation covariance matrix
 
@@ -196,7 +198,7 @@ for i, cmro2_true in enumerate(cmro2_true_values):
 
     # EnKF steps
     enkf.predict()
-    enkf.update(obs, X, Y)
+    enkf.update(obs, X_axis, Y_axis)
     
     # Get current estimate
     mean, cov = enkf.get_state_estimate()
@@ -204,24 +206,28 @@ for i, cmro2_true in enumerate(cmro2_true_values):
     cmro2_mean = mean[0] * cmro2_by_M
     R0_mean = mean[1]
 
+    pvessel_est = obs.max()
+
     cmro2_cov = cov[0, 0] * (cmro2_by_M**2)
     R0_cov = cov[1, 1]
 
     correction = np.abs(np.mean(enkf.length_scale * enkf.K @ enkf.innovation))
     
-    generator_enkf = MapGenerator(cmro2=cmro2_mean, 
-                        pvessel=pvessel, 
-                        Rves=Rves, 
-                        R0=R0_mean, 
-                        Rt=R0_mean,
-                        X=X,
-                        Y=Y)
+    params = SolverParameters(filename="square_holes")
+    hole_estimated = [HoleGeometry(center=(*center, 0.0), cmro2=cmro2_mean, Pves=pvessel_est, radius_ves=Rves_1, radius_0=R0_mean)]
+
+    generator_enkf = MapGenerator(
+                            holes=hole_estimated,
+                            params=params,
+                            X=X_axis,
+                            Y=Y_axis
+                            )
     obs_estimation = generator_enkf.pO2_array
 
     # fig = plt.figure(figsize=(12, 8))
     # ax = fig.add_subplot(projection='3d')
-    # sc = ax.plot_surface(X, Y, obs_perturbated_array, cmap='viridis', edgecolor='none')
-    # ax.plot_surface(X, Y, obs_estimation, cmap='plasma', alpha=0.6, edgecolor='none')
+    # sc = ax.plot_surface(X_axis, Y_axis, obs_perturbated_array, cmap='viridis', edgecolor='none')
+    # ax.plot_surface(X_axis, Y_axis, obs_estimation, cmap='plasma', alpha=0.6, edgecolor='none')
     # ax.set_xlabel('X (nm)')
     # ax.set_ylabel('Y (nm)')
     # ax.set_zlabel('pO2 (mmHg)')
@@ -229,8 +235,8 @@ for i, cmro2_true in enumerate(cmro2_true_values):
     # ax.set_title(f'Synthetic pO2 Data with Noise')
     # plt.show()
 
-    error_enkf_relative = np.abs(true_obs.flatten() - obs_estimation.flatten()) * 100 / np.abs(obs) 
-    error_enkf_absolute = np.abs(true_obs.flatten() - obs_estimation.flatten())
+    error_enkf_relative = np.abs(profile.flatten() - obs_estimation.flatten()) * 100 / np.abs(obs) 
+    error_enkf_absolute = np.abs(profile.flatten() - obs_estimation.flatten())
 
     # Save stats
     stats_overall.append((cmro2_mean, cmro2_cov))

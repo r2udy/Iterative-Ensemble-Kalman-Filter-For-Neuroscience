@@ -74,7 +74,7 @@ class EnKF:
         """
         # ratio M
         for k in range(self.state_dim):
-            self.ensemble[k, :] = self.rng.uniform(
+            self.ensemble[k, :] = self.rng.normal(
                 a[k], b[k], size=(1, self.n_ensembles)
                 )  # Shape: (state_dim, n_ensembles)
 
@@ -115,7 +115,7 @@ class EnKF:
         # Extract parameters from state
         cmro2   = state[0] * self.cmro2_by_M
         Pves    = state[2]
-        Rves    = 11.
+        Rves    = 17.
         R0      = state[1]
         center  = (0.0, 0.0)
         marker = 3
@@ -136,9 +136,9 @@ class EnKF:
                                 )
         # Define holes
         holes = [
-            HoleGeometry(center=(*center, 0), radius_ves=params.Rves, radius_0=params.R0, marker=3),
+            HoleGeometry(center=(*center, 0), cmro2=cmro2, Pves=Pves, radius_ves=Rves, radius_0=R0, marker=3),
             ]
-        
+
         # Generate mesh
         solver.generate_mesh(holes)
         
@@ -166,7 +166,7 @@ class EnKF:
         points = np.column_stack((X_domain.ravel(), Y_domain.ravel()))
 
         # Evaluate FEM solution at observation points
-        obs_model = griddata((x, y), uh, points, method='linear').reshape((n, n), order='F') # Interpolate z values at the grid points
+        obs_model = griddata((x, y), uh, points, method='linear').reshape((n, n), order='F').T # Interpolate z values at the grid points
         
         return obs_model.flatten()
         

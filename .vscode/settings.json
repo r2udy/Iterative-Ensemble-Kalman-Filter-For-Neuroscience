@@ -1,5 +1,7 @@
 {
     "python.analysis.extraPaths": [
-        "./classes"
+        "./classes",
+        "./Implementation/synthetic_data",
+        "./Implementation/Clustering"
     ]
 }

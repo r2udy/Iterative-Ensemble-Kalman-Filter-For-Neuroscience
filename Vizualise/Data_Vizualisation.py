@@ -8,7 +8,7 @@ Created on Fri Jun 13 16:43:41 2025
 import os
 import sys
 
-py_data_location = '/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data'
+py_data_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/"
 py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/classes/"
 sys.path.append(os.path.abspath(py_file_location))
 
@@ -18,20 +18,23 @@ import pandas as pd
 import matplotlib.tri as tri
 import matplotlib.pyplot as plt
 from circlesearch import Po2Analyzer
+from EnKF_FEM import EnKF, build_obs_covariance_radial, build_obs_covariance_diagonal
+from EnKF_FEM_3 import EnKF
+
 from MapGenerator import MapGenerator
 from Po2Dataset import load_data, get_cells_by_angle
 from EnKF_FEM import build_obs_covariance, build_obs_covariance_diagonal, build_obs_covariance_radial
 import pylab as P
 
 # --------- Load data --------- #
-df = pd.read_pickle(py_data_location + "/dataset.pkl")
+df = pd.read_pickle(py_data_location + "/dataset_radial.pkl")
 df_copy = df.copy()
 df_copy['pO2Value'] = df_copy['pO2Value'].apply(lambda x: x.flatten())
 df_copy.keys()
 
-uniform_dataset = load_data(py_data_location + '/uniform_dataset.txt')
+dataset = load_data(py_data_location + '/radial_dataset.txt')
 # Create a set of all (art_id, dth_id) pairs for O(1) lookups
-pair_set = {entry[0] for entry in uniform_dataset}
+pair_set = {entry[0] for entry in dataset}
 
 
 # ------------------- 
@@ -39,6 +42,36 @@ pair_set = {entry[0] for entry in uniform_dataset}
 D = 4.0e3
 alpha = 1.39e-15
 cmro2_by_M = (60 * D * alpha * 1e12)
+grid_size = 20 # data sizes
+
+for i, entry in enumerate(dataset):
+    art_id = entry[0][0]
+    dth_id = entry[0][1]
+
+    angles_1 = entry[1]
+    angles_2 = entry[2]
+
+    min_radius = entry[3][0]
+
+    mask = (df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id)
+
+    X_axis = df_copy[mask]['pointsX'].tolist()[0]
+    Y_axis = df_copy[mask]['pointsY'].tolist()[0]
+
+    # Observations
+    obs = df_copy[mask]['pO2Value'].tolist()[0]
+    pO2_array = obs.reshape((grid_size, grid_size), order='F')
+    
+    plt.figure(figsize=(6, 6))
+    plt.pcolor(pO2_array, cmap='jet', shading='auto')
+    plt.colorbar(label='pO₂')
+    plt.title(f"Radial pO₂ Map | Arteriole {art_id} | Depth {dth_id}")
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Y Coordinate')
+    plt.axis('equal')
+    plt.show()
+
+    plt.show()
 
 # -------------------
 # Data Vizualation #
@@ -46,10 +79,8 @@ art_id, dth_id = (5, 2)
 # Angle ranges: from 0 to 90 degrees and from 270 to 360 degrees
 angle_ranges = [(170, 290), (170, 290)]
 min_radius = 5
-grid_size = 20 # data sizes
 
-
-
+# -------------------
 # Load the map
 mask    = (df_copy["arteriole_id"] == art_id) & (df_copy['depth_id'] == dth_id)
 array   = df_copy[mask]['pO2Value'].tolist()[0]

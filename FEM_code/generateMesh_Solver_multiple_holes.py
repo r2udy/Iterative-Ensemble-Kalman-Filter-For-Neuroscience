@@ -16,7 +16,7 @@ import pyvista
 
 class HoleGeometry:
     """Represents a circular hole in the domain"""
-    def __init__(self, center, radius_ves, radius_0, marker, Pves, cmro2):
+    def __init__(self, center, radius_ves, radius_0, Pves, cmro2, marker=3):
         self.center = center
         self.radius_ves = radius_ves
         self.radius_0 = radius_0
@@ -165,6 +165,8 @@ class DiffusionSolver:
                 
         # Initialize M function
         self.M_func = fem.Function(self.V)
+
+        self.M_func.x.array[:] = -params.cmro2_background / self.cmro2_by_M
 
         for hole in holes:
             domain = self.domain
@@ -385,35 +387,37 @@ class DiffusionSolver:
 
 class SolverParameters:
     """Container for solver parameters"""
-    def __init__(self, filename, marker=3):
+    def __init__(self, filename, cmro2_background=0, marker=3):
         self.path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/"
         self.filename = filename
         self.marker = marker
+        
+        self.cmro2_background = cmro2_background
 
 def main():
     # Initialize MPI
     comm = MPI.COMM_WORLD
     
     # Create solver parameters
-    params = SolverParameters(filename="square_one_hole_id0_test")
+    params = SolverParameters(filename="square_one_hole_id0_test", cmro2_background=0.2)
     
     # Create solver instance
     solver = DiffusionSolver(comm)
     
     # Hole 1:
-    cmro2_1     = 1.5
+    cmro2_1     = 2.0
     Pves_1      = 80.
     Rves_1      = 10.
     R0_1        = 100.
 
     # Hole 2:
-    cmro2_2     = .5
+    cmro2_2     = .8
     Pves_2      = 40.
     Rves_2      = 10.
     R0_2        = 80.
 
     # Hole 3:
-    cmro2_3     = .5
+    cmro2_3     = .8
     Pves_3      = 40.
     Rves_3      = 10.
     R0_3        = 80.
@@ -434,7 +438,7 @@ def main():
     if comm.rank == 0:
         print("Setting up problem...")
     solver.setup_problem(params, holes)
-    solver.plot_boundaries(holes)
+    # solver.plot_boundaries(holes)
     
     if comm.rank == 0:
         print("Solving nonlinear problem...")
