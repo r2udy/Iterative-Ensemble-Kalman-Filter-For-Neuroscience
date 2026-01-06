@@ -18,7 +18,7 @@ from scipy.interpolate import griddata
 from EnKF_FEM_MM import EnKF
 from circlesearch import Po2Analyzer
 from MapGenerator import MapGenerator
-from FEM_code.generateMesh_Solver_one_hole_MM import HoleGeometry, DiffusionSolver, SolverParameters
+from FEM_code.generateMesh_Solver_multiple_MM import HoleGeometry, DiffusionSolver, SolverParameters
 from mpi4py import MPI
 import pylab as P
 

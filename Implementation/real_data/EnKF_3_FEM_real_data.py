@@ -59,7 +59,7 @@ uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 
 # --------------------------
 # Path for saving the data
-file_id_saving = "Test_stats/71_72_73_74_filtered"  # ID for saving the data
+file_id_saving = "Test_stats/71_72_73_74_filtered_test"  # ID for saving the data
 path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/" + file_id_saving + "/"
 
 # --------------------------
@@ -71,21 +71,21 @@ grid_size = 20 # data size
 
 cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_mean_inital = 2.0  # initial mean
-cmro2_var_initial = 1.**2  # 99.7% within [lower, upper]
-cmro2_var = 1.**2  # Uniform distribution variance
+cmro2_var_initial = .5**2 
+cmro2_var = .2**2  # Uniform distribution variance
 M_var = cmro2_var / cmro2_by_M**2  # model uncertainty scaled
 
 # Prior associated with R0
-R0_lower, R0_upper = 70., 100.
+# R0_lower, R0_upper = 70., 100.
 R0_mean_initial = 90.
-R0_var_initial = 1.**2 # 99.7% within [lower, upper]
+R0_var_initial = 1.**2
 R0_var = 1.**2 # prior uncertainty of capillary-free space radius
 
 # Prior associated with pvessel
-pvessel_lower, pvessel_upper = 85., 95.
-pvessel_mean_initial = 0.5 * (pvessel_lower + pvessel_upper)
-pvessel_var_initial = 5.**2  # 99.7% within [lower, upper]
-pvessel_var = 5.0**2 # prior uncertainty of Neumann boundary condition
+# pvessel_lower, pvessel_upper = 85., 95.
+pvessel_mean_initial = 90.
+pvessel_var_initial = 5.**2 
+pvessel_var = 5.**2 # prior uncertainty of Neumann boundary condition
 
 # Observation variance parameters
 obs_var_constant = 5.**2   # constant uncertainty of measurements in the observation covariance matrix R
@@ -104,8 +104,13 @@ n_ensembles = 50
 # a = np.array([cmro2_lower / cmro2_by_M, R0_lower, pvessel_lower])
 # b = np.array([cmro2_upper / cmro2_by_M, R0_upper, pvessel_upper])
 
-a = np.array([cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial])
-b = np.array([cmro2_var_initial / (cmro2_by_M)**2,  R0_var_initial,  pvessel_var_initial])
+a = np.array([cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial, 
+              cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial,
+              cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial])
+
+b = np.array([cmro2_var_initial / (cmro2_by_M)**2,  R0_var_initial,  pvessel_var_initial,
+              cmro2_var_initial / (cmro2_by_M)**2,  R0_var_initial,  pvessel_var_initial,
+              cmro2_var_initial / (cmro2_by_M)**2,  R0_var_initial,  pvessel_var_initial])
 
 # No dynamic model
 def dynamics_model(x):
@@ -167,7 +172,7 @@ for i, entry in enumerate(uniform_dataset):
     obs_filtered = gaussian_filter(obs_, sigma=sigma)  # Smooth the observation with a Gaussian filter
     obs_filtered_array = obs_filtered.reshape((grid_size, grid_size), order='F')
 
-    obs = obs_filtered
+    obs = obs_filtered.copy()
     obs_array = obs.reshape((grid_size, grid_size), order='F')
 
     observations.append(obs)
@@ -226,6 +231,7 @@ for i, entry in enumerate(uniform_dataset):
     R = obs_var_constant * np.eye(obs_dim) # Observation covariance matrix
 
     enkf.set_observation_noise(R)
+    enkf.length_scale = 1.   # length scale for localization
     enkf.predict()
     enkf.update(obs, X_axis, Y_axis)
 
@@ -298,7 +304,6 @@ for i, entry in enumerate(uniform_dataset):
     # ----------------------
     # (2) Smoothed map vs. True map
     ax = fig.add_subplot(2, 3, 2, projection="3d")
-
     sc = ax.plot_surface(X_axis, Y_axis, obs_.reshape((grid_size, grid_size), order='F'), cmap='viridis', edgecolor='none')
     ax.plot_surface(X_axis, Y_axis, obs_filtered_array, cmap='plasma', edgecolor='none')
     ax.set_xlabel('X (nm)')
@@ -332,28 +337,41 @@ for i, entry in enumerate(uniform_dataset):
     # (5) Approximated vs. True map
     ax = fig.add_subplot(2, 3, 5, projection="3d")
 
-    sc = ax.plot_surface(X_axis, Y_axis, obs_.reshape((grid_size, grid_size), order='F'), cmap='viridis', edgecolor='none')
-    ax.plot_surface(X_axis, Y_axis, obs_estimation, cmap='plasma', edgecolor='none', alpha=0.5)
+    sc = ax.plot_surface(X_axis, Y_axis, obs_estimation, cmap='plasma', edgecolor='none')
     ax.set_xlabel('X (nm)')
     ax.set_ylabel('Y (nm)')
     ax.set_zlabel('pO2 (mmHg)')
-    ax.set_title(f"Display of the approximated map: \nCMRO2:{cmro2_mean:.2f} umol /cm^3 /min\n R0:{R0_mean:.2f} um;\n P_vessel:{pvessel_mean:.2f} mmHg")
+    ax.set_title(f"Display of the approximated map: \nCMRO2:{cmro2_mean:.2f} umol /cm^3 /min\n R0:{R0_mean:.2f} um | sigma:{np.sqrt(R0_cov):.2f};\n Pvessel:{pvessel_mean:.2f} mmHg | sigma:{np.sqrt(pvessel_cov):.2f} mmHg\n NIS: {enkf.NIS}", fontsize=10)
     plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='Color scale: Partial Pressure (mmHg)')
 
     # ----------------------
     # (6) Non-Linear Least Square fitting
     ax = fig.add_subplot(2, 3, 6, projection="3d")
 
-    sc = ax.plot_surface(X_axis, Y_axis, obs_.reshape((grid_size, grid_size), order='F'), cmap='viridis', edgecolor='none')
-    ax.plot_surface(X_axis, Y_axis, obs_estimation_lsq, cmap='plasma', edgecolor='none', alpha=0.5)
+    sc = ax.plot_surface(X_axis, Y_axis, obs_estimation_lsq, cmap='plasma', edgecolor='none')
     ax.set_xlabel('X (nm)')
     ax.set_ylabel('Y (nm)')
     ax.set_zlabel('pO2 (mmHg)')
-    ax.set_title(f"Display of the approximated map: \nCMRO2:{cmro2_lsq:.2f} umol /cm^3 /min\n R0:{R0_lsq:.2f} um;\n P_vessel:{pvessel_lsq:.2f} mmHg")
+    ax.set_title(f"Display of the approximated map: \nCMRO2:{cmro2_lsq:.2f} umol /cm^3 /min\n R0:{R0_lsq:.2f} um;\n Pvessel:{pvessel_lsq:.2f} mmHg", fontsize=10)
     plt.colorbar(sc, ax=ax, shrink=0.3, aspect=10, label='Color scale: Partial Pressure (mmHg)')
     plt.tight_layout()
     plt.savefig(path + f'graphs_{art_id}{dth_id}_{i}.png', dpi=300, bbox_inches='tight')
     # plt.show()
+
+    # X = enkf.ensemble                    # (S, Ne)
+    # # recompute obs_model_ens if not stored:
+    # Ne = X.shape[1]
+    # obs_model_ens = np.zeros((enkf.obs_dim, Ne))
+    # for l in range(Ne):
+    #     obs_model_ens[:, l] = enkf.observation_operator(X[:, l], X_axis, Y_axis)
+
+    # x_mean = X.mean(axis=1)[:,None]
+    # y_mean = obs_model_ens.mean(axis=1)[:,None]
+    # X_dev = X - x_mean
+    # Y_dev = obs_model_ens - y_mean
+
+    # # cross covariance
+    # C_xy = (X_dev @ Y_dev.T) / (Ne - 1)   # shape (state_dim, obs_dim)
 
     # ----------------------
     # Print the results
@@ -440,6 +458,7 @@ P.grid(True)
 P.savefig(path + 'enkf_state_estimation.png', dpi=300, bbox_inches='tight')
 # P.show()
 
+
 # -----------------------
 # R0 Stats
 # -----------------------
@@ -486,8 +505,6 @@ P.title('EnKF Partial Pressure at the vessel wall\n State Estimation with Uncert
 P.grid(True)
 P.savefig(path + 'enkf_pvessel_state_estimation.png', dpi=300, bbox_inches='tight')
 # P.show()
-
-
 
 # -----------------------
 # Relative Error Stats
@@ -547,14 +564,41 @@ plt.savefig(path + 'enkf_correction.png', dpi=300, bbox_inches='tight')
 # -----------------------
 # Uncertainty associated to estimation
 # -----------------------
+fig = plt.figure(figsize=(12, 14))
+
+ax = fig.add_subplot(3, 1, 1)
 data = state_ensembles[0] * cmro2_by_M # Define data
 numBoxes = data.shape[0]  # now robust
-x_obs = np.arange(1, numBoxes + 1)
-
-fig, ax = plt.subplots(figsize=(10, 6))
+x_obs = np.arange(1, numBoxes + 1) 
 cov_track = np.array([np.std(array) for array in data])
 ax.plot(x_obs, cov_track, '-o', color='blue', label='Uncertainty in CMRO2 estimation (StD)')
 plt.ylabel('Estimated CMRO2 Uncertainty (umol /cm^3 /min)')
+plt.xlabel('$PO_{2}$ Map ID')
+plt.title('EnKF Uncertainty')
+plt.grid(True)
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.legend()
+
+ax = fig.add_subplot(3, 1, 2)
+data = state_ensembles[1] # Define data
+numBoxes = data.shape[0]  # now robust
+x_obs = np.arange(1, numBoxes + 1) 
+cov_track = np.array([np.std(array) for array in data])
+ax.plot(x_obs, cov_track, '-o', color='blue', label='Uncertainty in CMRO2 estimation (StD)')
+plt.ylabel('Estimated R0 Uncertainty (um)')
+plt.xlabel('$PO_{2}$ Map ID')
+plt.title('EnKF Uncertainty')
+plt.grid(True)
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.legend()
+
+ax = fig.add_subplot(3, 1, 3)
+data = state_ensembles[2] # Define data
+numBoxes = data.shape[0]  # now robust
+x_obs = np.arange(1, numBoxes + 1) 
+cov_track = np.array([np.std(array) for array in data])
+ax.plot(x_obs, cov_track, '-o', color='blue', label='Uncertainty in CMRO2 estimation (StD)')
+plt.ylabel('Estimated Pvessel Uncertainty (mmHg)')
 plt.xlabel('$PO_{2}$ Map ID')
 plt.title('EnKF Uncertainty')
 plt.grid(True)
@@ -565,7 +609,7 @@ plt.savefig(path + 'enkf_uncertainty.png', dpi=300, bbox_inches='tight')
 # plt.show()
 
 # -----------------------
-# Uncertainty associated to estimation
+# Estimation + Uncertainty of CMRO2
 # -----------------------
 # Create figure
 plt.figure(figsize=(10, 6))
@@ -593,6 +637,35 @@ plt.legend()
 plt.grid(True)
 plt.savefig(path + 'enkf_cmro2_estimation_and_uncertainty.png', dpi=300, bbox_inches='tight')
 # plt.show()
+
+# -----------------------
+# Data
+labels = [f'Obs{i}' for i in x_obs]
+control_means = cmro2_est_lsq
+control_err = np.zeros_like(control_means)  # No error bars for control
+
+experimental_means = cmro2_mean_
+experimental_err = np.sqrt(cmro2_cov_)
+
+width = 0.35
+
+# Plot
+plt.figure(figsize=(8, 5))
+plt.bar(x_obs - width/2, control_means, width,
+        yerr=control_err, capsize=5,
+        label="Control")
+
+plt.bar(x_obs + width/2, experimental_means, width,
+        yerr=experimental_err, capsize=5,
+        label="Experimental")
+plt.title("CMRO2 Estimation: EnKF vs Non-Linear LSQ")
+plt.xticks(x_obs, labels)
+plt.ylabel('CMRO2 (umol /cm^3 /min)')
+plt.legend()
+plt.tight_layout()
+plt.savefig(path + 'enkf_cmro2_estimation_and_uncertainty_barplot.png', dpi=300, bbox_inches='tight')
+# plt.show()
+
 
 # -----------------------
 # Posterior distribution through the iteration

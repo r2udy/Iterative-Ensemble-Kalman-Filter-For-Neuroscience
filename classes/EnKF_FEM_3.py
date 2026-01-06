@@ -19,7 +19,7 @@ from Po2Dataset import get_cells_by_angle
 
 py_file_location = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/"
 sys.path.append(os.path.abspath(py_file_location))
-from FEM_code.generateMesh_Solver_one_hole import HoleGeometry, DiffusionSolver, SolverParameters
+from FEM_code.generateMesh_Solver_multiple_holes import HoleGeometry, DiffusionSolver, SolverParameters
 
 class EnKF:
     def __init__(self,
@@ -59,6 +59,7 @@ class EnKF:
         self.R = np.eye(obs_dim) # Observation noise covariance
 
         self.length_scale = 1.0 # Length scale for the update step
+        self.grid_size = 20 # observation dimension
         
         
     def initialize_ensemble(self, a: np.ndarray, b: np.ndarray):
@@ -86,7 +87,7 @@ class EnKF:
         """Set the observation noise covariance matrix"""
         self.R = R
 
-    def observation_operator(self, state: np.ndarray, X: np.ndarray, Y: np.ndarray, observation: np.ndarray) -> np.ndarray:
+    def observation_operator(self, state: np.ndarray, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
         """
         Parameters
         ----------
@@ -102,20 +103,12 @@ class EnKF:
             Index of the 
         """
         
-        assert observation.shape == (self.obs_dim,)
         assert state.shape == (self.state_dim,)
-        
-        # Initialize Circle Search
-        n = 20 # observation dimension
-        observation.mean()
-        observation_array = np.reshape(observation, (n, n)) # ensemble member observation (n by n)
-        analyzer = Po2Analyzer(observation_array, X, Y)
-        analyzer.find_circles()
-        
+                
         # Extract parameters from state
         cmro2   = state[0] * self.cmro2_by_M
         Pves    = state[2]
-        Rves    = 17.
+        Rves    = np.diff(X[0])[0]
         R0      = state[1]
         center  = (0.0, 0.0)
         marker = 3
@@ -128,15 +121,9 @@ class EnKF:
         solver = DiffusionSolver(comm)
 
         # Create solver parameters
-        params = SolverParameters(filename="square_one_hole", 
-                                  cmro2=cmro2, 
-                                  Pves=Pves, 
-                                  Rves=Rves, 
-                                  R0=R0
-                                )
+        params = SolverParameters(filename="square_one_hole")
         # Define holes
-        holes = [
-            HoleGeometry(center=(*center, 0), cmro2=cmro2, Pves=Pves, radius_ves=Rves, radius_0=R0, marker=3),
+        holes = [ HoleGeometry(center=(*center, 0), cmro2=cmro2, Pves=Pves, radius_ves=Rves, radius_0=R0, marker=3),
             ]
 
         # Generate mesh
@@ -166,7 +153,7 @@ class EnKF:
         points = np.column_stack((X_domain.ravel(), Y_domain.ravel()))
 
         # Evaluate FEM solution at observation points
-        obs_model = griddata((x, y), uh, points, method='linear').reshape((n, n), order='F').T # Interpolate z values at the grid points
+        obs_model = griddata((x, y), uh, points, method='linear').reshape((self.grid_size, self.grid_size), order='F').T # Interpolate z values at the grid points
         
         return obs_model.flatten()
         
@@ -212,20 +199,13 @@ class EnKF:
 
         for i in local_indices:
             state = self.ensemble[:, i]
-            result = self.observation_operator(state, X, Y, obs_ensemble[:, i])
+            result = self.observation_operator(state, X, Y)
             local_results.append(result)
 
         # Gather results from all ranks
         gathered_results = comm.allgather(local_results)
         gathered_results = [item for sublist in gathered_results for item in sublist]
         obs_model_ensembles = np.array(gathered_results).T  # shape (obs_dim, n_ensembles)
-
-
-        # for i in range(self.n_ensembles):
-        #     # ensemble member state parameter
-        #     state = self.ensemble[:, i]
-        #     obs_model_ensembles[:, i] = self.observation_operator(state, X, Y, obs_ensemble[:, i])
-
 
         # 1. Compute ensemble means and deviations
         state_mean = np.mean(self.ensemble, axis=1)
@@ -243,7 +223,11 @@ class EnKF:
         # 3. Update ensemble: innovation = observation - obs_model(ensemble)
         self.innovation = obs_ensemble - obs_model_ensembles
         self.ensemble += self.length_scale * self.K @ self.innovation
-        
+
+        y = observation
+        NIS = (y - obs_mean).T @ np.linalg.inv(self.A_HBHT + self.R) @ (y - obs_mean)
+        self.NIS = NIS    
+            
     def get_state_estimate(self):
         """
         Get the current state estimate (mean and covariance)

@@ -168,14 +168,15 @@ class DiffusionSolver:
 
         self.M_func.x.array[:] = -params.cmro2_background / self.cmro2_by_M
 
+        domain = self.domain
+        tdim = domain.topology.dim
+        fdim = tdim - 1
+        domain.topology.create_connectivity(fdim, tdim)
+        domain.topology.create_connectivity(fdim, 0)  # Needed to get vertices of each facet
+        x = domain.geometry.x  # Nodal coordinates
+        
         for hole in holes:
-            domain = self.domain
-            tdim = domain.topology.dim
-            fdim = tdim - 1
-            domain.topology.create_connectivity(fdim, tdim)
-            domain.topology.create_connectivity(fdim, 0)  # Needed to get vertices of each facet
-            x = domain.geometry.x  # Nodal coordinates
-            
+
             inner_facets = []
             inner_values = []
             num_facets = domain.topology.index_map(fdim).size_local # Get all local facets
@@ -387,7 +388,7 @@ class DiffusionSolver:
 
 class SolverParameters:
     """Container for solver parameters"""
-    def __init__(self, filename, cmro2_background=0, marker=3):
+    def __init__(self, filename, cmro2_background=0., marker=3):
         self.path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/FEM_dataset/"
         self.filename = filename
         self.marker = marker
@@ -399,7 +400,7 @@ def main():
     comm = MPI.COMM_WORLD
     
     # Create solver parameters
-    params = SolverParameters(filename="square_one_hole_id0_test", cmro2_background=0.2)
+    params = SolverParameters(filename="square_one_hole_id0_test", cmro2_background=0.0)
     
     # Create solver instance
     solver = DiffusionSolver(comm)
