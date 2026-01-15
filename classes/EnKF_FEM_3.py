@@ -78,6 +78,9 @@ class EnKF:
             self.ensemble[k, :] = self.rng.normal(
                 a[k], b[k], size=(1, self.n_ensembles)
                 )  # Shape: (state_dim, n_ensembles)
+        
+        self.R0_prior = a[1]
+        self.sigma_R0 = b[1]
 
     def set_process_noise(self, B: np.ndarray):
         """Set the background noise covariance matrix"""
@@ -208,24 +211,51 @@ class EnKF:
         obs_model_ensembles = np.array(gathered_results).T  # shape (obs_dim, n_ensembles)
 
         # 1. Compute ensemble means and deviations
-        state_mean = np.mean(self.ensemble, axis=1)
-        obs_mean = np.mean(obs_model_ensembles, axis=1)
+        state_mean  = np.mean(self.ensemble, axis=1)
+        obs_mean    = np.mean(obs_model_ensembles, axis=1)
+        state_deviation     = self.ensemble - state_mean[:, np.newaxis]
+        obs_deviation       = obs_model_ensembles - obs_mean[:, np.newaxis]
         
-        state_deviation = self.ensemble - state_mean[:, np.newaxis]
-        obs_deviation = obs_model_ensembles - obs_mean[:, np.newaxis]
-        
-        # 2. Compute Kalman Gain
-        A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
-        self.A_BHT = (state_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
-        self.A_HBHT = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
-        self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + self.R)
-        
-        # 3. Update ensemble: innovation = observation - obs_model(ensemble)
-        self.innovation = obs_ensemble - obs_model_ensembles
-        self.ensemble += self.length_scale * self.K @ self.innovation
+        # Augmented observed ensemble
+        R0_obs_pert = self.rng.normal(
+            loc=self.R0_prior,
+            scale=self.sigma_R0,
+            size=self.n_ensembles
+        )
+        obs_ensemble_aug = np.vstack([
+            obs_ensemble, 
+            R0_obs_pert[np.newaxis, :]
+        ])
 
-        y = observation
-        NIS = (y - obs_mean).T @ np.linalg.inv(self.A_HBHT + self.R) @ (y - obs_mean)
+        R0_model = self.ensemble[1, :]
+
+        obs_model_ensembles_aug = np.vstack([
+            obs_model_ensembles,
+            R0_model[np.newaxis, :]
+        ])
+
+        obs_mean_aug = np.mean(obs_model_ensembles_aug, axis=1)
+        obs_deviation_aug = obs_model_ensembles_aug - obs_mean_aug[:, np.newaxis]
+
+        R_aug = np.block([
+            [self.R,                        np.zeros((self.obs_dim, 1))],
+            [np.zeros((1, self.obs_dim)),   np.array([[self.sigma_R0**2]])]
+        ])
+        # 2. Compute Kalman Gain
+        # A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
+        self.A_BHT = (state_deviation @ obs_deviation_aug.T) / (self.n_ensembles - 1)
+        self.A_HBHT = (obs_deviation_aug @ obs_deviation_aug.T) / (self.n_ensembles - 1)
+        self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + R_aug)
+        
+            # 3. Update ensemble: innovation = (perturbed) observation - model prediction (both augmented)
+        self.innovation_aug = obs_ensemble_aug - obs_model_ensembles_aug
+        # keep legacy attribute name for external code compatibility
+        self.innovation = self.innovation_aug
+        self.ensemble += self.length_scale * self.K @ self.innovation_aug
+
+        # Compute NIS on the original (unaugmented) observation space
+        A_HBHT_unaug = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
+        NIS = (observation - obs_mean).T @ np.linalg.inv(A_HBHT_unaug + self.R) @ (observation - obs_mean)
         self.NIS = NIS    
             
     def get_state_estimate(self):

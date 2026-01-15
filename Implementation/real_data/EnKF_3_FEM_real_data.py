@@ -48,7 +48,7 @@ import time
 # --------- Load data --------- #
 df = pd.read_pickle(py_data_location + "dataset.pkl")
 df_copy = df.copy()
-df_copy['pO2Value'] = df_copy['pO2Value']#.apply(lambda x: x.flatten())
+df_copy['pO2Value'] = df_copy['pO2Value']
 # df_copy.keys()
 
 path_metadata = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/TODEsource/dbase/"
@@ -59,7 +59,7 @@ uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 
 # --------------------------
 # Path for saving the data
-file_id_saving = "Test_stats/71_72_73_74_filtered_test"  # ID for saving the data
+file_id_saving = "Test_stats/36_aug"  # ID for saving the data
 path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/" + file_id_saving + "/"
 
 # --------------------------
@@ -72,18 +72,18 @@ grid_size = 20 # data size
 cmro2_lower, cmro2_upper = 1.0, 3.0
 cmro2_mean_inital = 2.0  # initial mean
 cmro2_var_initial = .5**2 
-cmro2_var = .2**2  # Uniform distribution variance
+cmro2_var = .5**2  # Uniform distribution variance
 M_var = cmro2_var / cmro2_by_M**2  # model uncertainty scaled
 
 # Prior associated with R0
 # R0_lower, R0_upper = 70., 100.
-R0_mean_initial = 90.
-R0_var_initial = 1.**2
-R0_var = 1.**2 # prior uncertainty of capillary-free space radius
+R0_mean_initial = 80.
+R0_var_initial = 2.**2
+R0_var = 2.**2 # prior uncertainty of capillary-free space radius
 
 # Prior associated with pvessel
 # pvessel_lower, pvessel_upper = 85., 95.
-pvessel_mean_initial = 90.
+pvessel_mean_initial = 70.
 pvessel_var_initial = 5.**2 
 pvessel_var = 5.**2 # prior uncertainty of Neumann boundary condition
 

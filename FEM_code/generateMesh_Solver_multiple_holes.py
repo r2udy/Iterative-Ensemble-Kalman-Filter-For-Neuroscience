@@ -407,21 +407,21 @@ def main():
     
     # Hole 1:
     cmro2_1     = 2.0
-    Pves_1      = 80.
-    Rves_1      = 10.
+    Pves_1      = 60.
+    Rves_1      = 20.
     R0_1        = 100.
 
     # Hole 2:
     cmro2_2     = .8
     Pves_2      = 40.
-    Rves_2      = 10.
-    R0_2        = 80.
+    Rves_2      = 5.
+    R0_2        = 10.
 
     # Hole 3:
     cmro2_3     = .8
     Pves_3      = 40.
-    Rves_3      = 10.
-    R0_3        = 80.
+    Rves_3      = 5.
+    R0_3        = 10.
 
     # Define holes
     holes = [
@@ -439,7 +439,7 @@ def main():
     if comm.rank == 0:
         print("Setting up problem...")
     solver.setup_problem(params, holes)
-    # solver.plot_boundaries(holes)
+    solver.plot_boundaries(holes)
     
     if comm.rank == 0:
         print("Solving nonlinear problem...")

@@ -82,7 +82,7 @@ class Po2Fitter_3:
         r0_initial = 80.
         pvessel_initial = self.pvessel
         initial_params = [M_initial, pvessel_initial, r0_initial] # M, rin, rout
-        bounds = ([1e-3, 30, self.rin], [1e-2, 100, r_axis.max()])
+        bounds = ([1e-4, 30, self.rin], [1e-1, 120, r_axis.max()])
         print("\nLeast squares nonlinear fitting - 3 paramters (CMRO2, P_{vessel wall} and R0)\n")
         result = least_squares(residual, x0=initial_params, bounds=bounds, verbose=1, max_nfev=10000)
         
