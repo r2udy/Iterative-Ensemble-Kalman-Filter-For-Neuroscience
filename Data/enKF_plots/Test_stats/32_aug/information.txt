@@ -23,8 +23,8 @@ M_var = cmro2_var / cmro2_by_M**2  	# model uncertainty scaled
 
 # Initial guess: Uniform distribution for R0
 R0_mean_initial 	= 80.
-R0_var_initial 		= 1.**2
-R0_var 			= 1.**2 	# prior uncertainty of capillary-free space radius
+R0_var_initial 		= 2.**2
+R0_var 			= 2.**2 	# prior uncertainty of capillary-free space radius
 
 # Initial guess: Uniform distribution for pvessel
 pvessel_mean_initial 	= 80.

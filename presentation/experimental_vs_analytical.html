@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Experimental vs Analytical — Heat Equation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap');
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+  :root {
+    --bg:     #f7f8fc;
+    --card:   #ffffff;
+    --border: #e4e8f0;
+    --text:   #1e2130;
+    --muted:  #7a7f94;
+    --ana:    #2c7bb6;
+    --exp:    #e05c2a;
+    --res:    #3aabaa;
+    --noise:  0.04;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: 'Inter', sans-serif;
+    color: var(--text);
+    padding: 28px 28px 48px;
+  }
+
+  /* ── Header ── */
+  .header { text-align:center; margin-bottom:28px; }
+  .header h1 { font-size:19px; font-weight:600; letter-spacing:-0.3px; }
+  .header p  { margin-top:6px; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--muted); }
+
+  /* ── Controls ── */
+  .controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 32px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .ctrl-group { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .ctrl-group label {
+    font-size: 10px; font-weight:600; letter-spacing:0.1em;
+    text-transform:uppercase; color:var(--muted);
+  }
+  .ctrl-group .val {
+    font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text);
+  }
+  input[type=range] {
+    -webkit-appearance:none; width:160px; height:3px;
+    background:#dde2ef; border-radius:3px; outline:none; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:14px; height:14px;
+    border-radius:50%; background:var(--ana);
+    box-shadow: 0 0 0 3px rgba(44,123,182,0.18);
+  }
+  .noise-thumb::-webkit-slider-thumb { background: var(--exp) !important; box-shadow: 0 0 0 3px rgba(224,92,42,0.18) !important; }
+
+  /* ── Legend ── */
+  .legend {
+    display:flex; justify-content:center; gap:24px; margin-bottom:20px; flex-wrap:wrap;
+  }
+  .leg-item { display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--muted); }
+  .leg-line { width:28px; height:3px; border-radius:2px; }
+  .leg-dot  { width:10px; height:10px; border-radius:50%; border:2px solid; }
+
+  /* ── Grid ── */
+  .grid {
+    display:grid;
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: auto auto;
+    gap:16px;
+    max-width:1100px;
+    margin:0 auto;
+  }
+
+  .card {
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:18px 18px 14px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.04);
+  }
+  .card-title {
+    font-size:12px; font-weight:600; color:var(--text);
+    margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .card-title .tag {
+    font-size:9.5px; font-weight:600; letter-spacing:0.08em;
+    text-transform:uppercase; padding:2px 9px; border-radius:20px;
+  }
+  .tag.ana  { background:#deeef9; color:var(--ana); }
+  .tag.exp  { background:#fce8e0; color:var(--exp); }
+  .tag.both { background:#f0f0f0; color:#555; }
+  .tag.res  { background:#e0f5f4; color:var(--res); }
+
+  .card-note {
+    margin-top:10px; font-size:10.5px; color:var(--muted);
+    line-height:1.6; font-style:italic;
+    border-top:1px solid var(--border); padding-top:8px;
+  }
+  .card-note span { font-family:'JetBrains Mono',monospace; font-style:normal; }
+
+  .axis path, .axis line { stroke:#dde; }
+  .axis text { fill:#999; font-size:9px; font-family:'JetBrains Mono',monospace; }
+
+  /* metrics row */
+  .metrics {
+    display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;
+  }
+  .metric {
+    flex:1; background:var(--bg); border-radius:7px;
+    padding:10px 14px; text-align:center; min-width:80px;
+  }
+  .metric .m-val { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:600; }
+  .metric .m-lbl { font-size:9px; color:var(--muted); margin-top:3px; letter-spacing:0.08em; text-transform:uppercase; }
+  .metric.good .m-val { color:#3aabaa; }
+  .metric.warn .m-val { color:#e8a838; }
+  .metric.bad  .m-val { color:#d9534f; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Experimental data vs Analytical solution</h1>
+  <p>∂u/∂t = α ∂²u/∂x²&nbsp;&nbsp;·&nbsp;&nbsp;Dirichlet BCs&nbsp;&nbsp;·&nbsp;&nbsp;Simulated sensor measurements with Gaussian noise</p>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <div class="ctrl-group">
+    <label>Time snapshot  t</label>
+    <input type="range" id="tSlider" min="0.1" max="8" step="0.1" value="1.5">
+    <div class="val" id="tVal">t = 1.50</div>
+  </div>
+  <div class="ctrl-group">
+    <label>α — true value</label>
+    <input type="range" id="alphaSlider" min="0.01" max="0.40" step="0.01" value="0.08">
+    <div class="val" id="alphaVal">α = 0.08</div>
+  </div>
+  <div class="ctrl-group">
+    <label>Noise level σ</label>
+    <input type="range" class="noise-thumb" id="noiseSlider" min="0.00" max="0.25" step="0.005" value="0.04">
+    <div class="val" id="noiseVal">σ = 0.040</div>
+  </div>
+  <div class="ctrl-group">
+    <label>N sensors</label>
+    <input type="range" id="nSlider" min="5" max="40" step="1" value="15">
+    <div class="val" id="nVal">N = 15</div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="leg-item">
+    <div class="leg-line" style="background:var(--ana)"></div>
+    Analytical u(x,t)
+  </div>
+  <div class="leg-item">
+    <div class="leg-dot" style="border-color:var(--exp); background:rgba(224,92,42,0.15)"></div>
+    Experimental data (sensors + noise)
+  </div>
+  <div class="leg-item">
+    <div class="leg-line" style="background:var(--res); height:2px; border-top: 2px dashed var(--res); background:none;"></div>
+    Residual e(x) = u_model − u_data
+  </div>
+</div>
+
+<!-- Grid -->
+<div class="grid">
+
+  <!-- Main chart -->
+  <div class="card" style="grid-row:1/2; grid-column:1/2;">
+    <div class="card-title">
+      Spatial snapshot at time t
+      <span class="tag both">Analytical vs Data</span>
+    </div>
+    <svg id="mainChart" width="100%" height="220"></svg>
+    <div class="card-note">
+      Blue curve = exact analytical solution. Orange dots = sensor readings corrupted by Gaussian noise
+      <span>ε ~ 𝒩(0, σ²)</span>. Error bars show ±σ measurement uncertainty.
+      In a real experiment, only the dots are observed.
+    </div>
+  </div>
+
+  <!-- Metrics -->
+  <div class="card" style="grid-row:1/2; grid-column:2/3;">
+    <div class="card-title">Validation metrics <span class="tag res">Quantitative</span></div>
+    <div class="metrics" id="metricsBox"></div>
+    <div class="card-note" style="margin-top:14px;">
+      <span>RMSE</span> and <span>MaxErr</span> quantify the global and worst-case mismatch.
+      <span>R²</span> measures how much variance the model explains — close to 1 is good.
+      These update live as you change noise or α.
+    </div>
+  </div>
+
+  <!-- Residual chart -->
+  <div class="card" style="grid-row:2/3; grid-column:1/2;">
+    <div class="card-title">
+      Residuals  e(xᵢ) = u_model(xᵢ) − u_data(xᵢ)
+      <span class="tag res">Residual analysis</span>
+    </div>
+    <svg id="residChart" width="100%" height="160"></svg>
+    <div class="card-note" id="residNote"></div>
+  </div>
+
+  <!-- Noise explainer -->
+  <div class="card" style="grid-row:2/3; grid-column:2/3;">
+    <div class="card-title">What is experimental data? <span class="tag exp">Physics</span></div>
+    <div style="font-size:11.5px; color:#444; line-height:1.7; margin-top:4px;">
+      Real measurements are never clean. A thermocouple reading at position xᵢ gives:
+      <div style="text-align:center; margin:12px 0; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text);">
+        ũ(xᵢ, t) = u(xᵢ, t) + εᵢ
+      </div>
+      where <b>εᵢ ~ 𝒩(0, σ²)</b> captures:
+      <ul style="margin:10px 0 0 16px; font-size:11px; color:var(--muted); line-height:1.9;">
+        <li>Sensor calibration error</li>
+        <li>Electrical interference</li>
+        <li>Contact thermal resistance</li>
+        <li>Finite sensor response time</li>
+      </ul>
+      <div style="margin-top:12px; font-size:11px; color:var(--muted); font-style:italic;">
+        Random residuals → model is correct.<br>
+        Systematic residuals → model assumption is wrong.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Math ──────────────────────────────────────────────────────
+const PI = Math.PI;
+const modes = [[1,1.0],[3,0.4],[5,0.12],[7,0.04]];
+
+function uxt(x, t, alpha) {
+  return modes.reduce((s,[n,a]) => s + a*Math.sin(n*x)*Math.exp(-alpha*n*n*t), 0);
+}
+
+function linspace(a,b,n) {
+  return Array.from({length:n},(_,i)=>a+(b-a)*i/(n-1));
+}
+
+// seeded-ish random (stable on redraw unless noise/N changes)
+let seed = 42;
+function seededRand() {
+  seed = (seed * 16807 + 0) % 2147483647;
+  return (seed - 1) / 2147483646;
+}
+function randNormal() {
+  // Box-Muller
+  const u1 = seededRand(), u2 = seededRand();
+  return Math.sqrt(-2*Math.log(u1+1e-10)) * Math.cos(2*PI*u2);
+}
+
+// ── State ─────────────────────────────────────────────────────
+let tVal=1.5, alphaVal=0.08, noiseVal=0.04, nVal=15;
+
+// ── Sliders ───────────────────────────────────────────────────
+const sl = (id, disp, fmt, cb) => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    document.getElementById(disp).textContent = fmt(+el.value);
+    cb(+el.value);
+    seed = 42;  // reset seed so noise pattern is consistent
+    render();
+  });
+};
+
+sl('tSlider',     'tVal',     v=>`t = ${v.toFixed(2)}`,   v=>tVal=v);
+sl('alphaSlider', 'alphaVal', v=>`α = ${v.toFixed(2)}`,   v=>alphaVal=v);
+sl('noiseSlider', 'noiseVal', v=>`σ = ${v.toFixed(3)}`,   v=>noiseVal=v);
+sl('nSlider',     'nVal',     v=>`N = ${Math.round(v)}`,  v=>nVal=Math.round(v));
+
+// ── Chart margins ─────────────────────────────────────────────
+const M = {top:10, right:18, bottom:28, left:40};
+
+function chartDims(svgEl, h) {
+  const W = svgEl.getBoundingClientRect().width || 600;
+  return { W: W-M.left-M.right, H: h-M.top-M.bottom };
+}
+
+function baseG(svg, h) {
+  svg.selectAll('*').remove();
+  const {W,H} = chartDims(svg.node(), h);
+  const g = svg.append('g').attr('transform',`translate(${M.left},${M.top})`);
+  return {g, W, H};
+}
+
+function addAxes(g, xS, yS, W, H, xLabel, yLabel) {
+  g.append('g').attr('class','axis').attr('transform',`translate(0,${H})`)
+   .call(d3.axisBottom(xS).ticks(5)
+     .tickFormat(v => {
+       const refs = [[0,'0'],[PI/2,'π/2'],[PI,'π']];
+       const hit = refs.find(([r])=>Math.abs(r-v)<0.15);
+       return hit ? hit[1] : '';
+     }));
+  g.append('g').attr('class','axis').call(d3.axisLeft(yS).ticks(4));
+  if (xLabel) g.append('text').attr('x',W/2).attr('y',H+22)
+    .attr('text-anchor','middle').attr('fill','#bbb').attr('font-size',8.5).text(xLabel);
+  if (yLabel) g.append('text').attr('transform','rotate(-90)').attr('x',-H/2).attr('y',-30)
+    .attr('text-anchor','middle').attr('fill','#bbb').attr('font-size',8.5).text(yLabel);
+}
+
+// ── Render ────────────────────────────────────────────────────
+function render() {
+  const xs   = linspace(0, PI, 300);
+  const ana  = xs.map(x => uxt(x, tVal, alphaVal));
+
+  // sensor positions — slightly irregular (not perfectly uniform)
+  seed = 42;
+  const xSensors = linspace(0.08, PI-0.08, nVal).map(x => x + (seededRand()-0.5)*0.05);
+  const uTrue    = xSensors.map(x => uxt(x, tVal, alphaVal));
+  const noise    = xSensors.map(() => randNormal() * noiseVal);
+  const uData    = uTrue.map((u,i) => u + noise[i]);
+  const residuals = uData.map((u,i) => uTrue[i] - u);   // model - data
+
+  // ── Metrics ───────────────────────────────────────────────
+  const rmse    = Math.sqrt(d3.mean(residuals.map(r=>r*r)));
+  const maxErr  = d3.max(residuals.map(r=>Math.abs(r)));
+  const uMean   = d3.mean(uData);
+  const ssTot   = d3.sum(uData.map(u=>(u-uMean)**2));
+  const ssRes   = d3.sum(residuals.map(r=>r*r));
+  const r2      = 1 - ssRes/ssTot;
+
+  const cls = v => v < 0.03 ? 'good' : v < 0.08 ? 'warn' : 'bad';
+  document.getElementById('metricsBox').innerHTML = `
+    <div class="metric ${cls(rmse)}">
+      <div class="m-val">${rmse.toFixed(4)}</div>
+      <div class="m-lbl">RMSE</div>
+    </div>
+    <div class="metric ${cls(maxErr)}">
+      <div class="m-val">${maxErr.toFixed(4)}</div>
+      <div class="m-lbl">Max |e|</div>
+    </div>
+    <div class="metric ${r2>0.97?'good':r2>0.90?'warn':'bad'}">
+      <div class="m-val">${r2.toFixed(4)}</div>
+      <div class="m-lbl">R²</div>
+    </div>
+  `;
+
+  // ── Main chart ────────────────────────────────────────────
+  const svg1 = d3.select('#mainChart');
+  const {g:g1, W:W1, H:H1} = baseG(svg1, 220);
+
+  const allY = [...ana, ...uData.map((u,i)=>u+noiseVal), ...uData.map((u,i)=>u-noiseVal)];
+  const yMin = Math.min(...allY)-0.05, yMax = Math.max(...allY)+0.05;
+
+  const xS1 = d3.scaleLinear([0,PI],[0,W1]);
+  const yS1 = d3.scaleLinear([yMin,yMax],[H1,0]);
+
+  addAxes(g1, xS1, yS1, W1, H1, 'x  (position)', 'u(x, t)');
+
+  // zero line
+  g1.append('line').attr('x1',0).attr('x2',W1).attr('y1',yS1(0)).attr('y2',yS1(0))
+    .attr('stroke','#eee').attr('stroke-width',1);
+
+  // analytical curve
+  g1.append('path')
+    .datum(xs.map((x,i)=>[x,ana[i]]))
+    .attr('fill','none').attr('stroke','#2c7bb6').attr('stroke-width',2.4)
+    .attr('d', d3.line().x(d=>xS1(d[0])).y(d=>yS1(d[1])));
+
+  // error bars
+  xSensors.forEach((x,i)=>{
+    g1.append('line')
+      .attr('x1',xS1(x)).attr('x2',xS1(x))
+      .attr('y1',yS1(uData[i]-noiseVal)).attr('y2',yS1(uData[i]+noiseVal))
+      .attr('stroke','rgba(224,92,42,0.35)').attr('stroke-width',1.2);
+    g1.append('line')
+      .attr('x1',xS1(x)-3).attr('x2',xS1(x)+3)
+      .attr('y1',yS1(uData[i]-noiseVal)).attr('y2',yS1(uData[i]-noiseVal))
+      .attr('stroke','rgba(224,92,42,0.35)').attr('stroke-width',1);
+    g1.append('line')
+      .attr('x1',xS1(x)-3).attr('x2',xS1(x)+3)
+      .attr('y1',yS1(uData[i]+noiseVal)).attr('y2',yS1(uData[i]+noiseVal))
+      .attr('stroke','rgba(224,92,42,0.35)').attr('stroke-width',1);
+  });
+
+  // data points
+  xSensors.forEach((x,i)=>{
+    g1.append('circle')
+      .attr('cx',xS1(x)).attr('cy',yS1(uData[i])).attr('r',4.5)
+      .attr('fill','rgba(224,92,42,0.18)').attr('stroke','#e05c2a').attr('stroke-width',1.8);
+  });
+
+  // ── Residual chart ────────────────────────────────────────
+  const svg2 = d3.select('#residChart');
+  const {g:g2, W:W2, H:H2} = baseG(svg2, 160);
+
+  const rMax = Math.max(Math.abs(d3.min(residuals)), Math.abs(d3.max(residuals)), 0.02)*1.3;
+  const xS2  = d3.scaleLinear([0,PI],[0,W2]);
+  const yS2  = d3.scaleLinear([-rMax,rMax],[H2,0]);
+
+  addAxes(g2, xS2, yS2, W2, H2, 'x  (position)', 'residual e');
+
+  // zero line
+  g2.append('line').attr('x1',0).attr('x2',W2).attr('y1',yS2(0)).attr('y2',yS2(0))
+    .attr('stroke','#aaa').attr('stroke-width',1).attr('stroke-dasharray','4,3');
+
+  // ±σ band
+  g2.append('rect')
+    .attr('x',0).attr('width',W2)
+    .attr('y',yS2(noiseVal)).attr('height',yS2(-noiseVal)-yS2(noiseVal))
+    .attr('fill','rgba(58,171,170,0.08)').attr('stroke','rgba(58,171,170,0.25)')
+    .attr('stroke-width',1).attr('stroke-dasharray','3,2');
+  g2.append('text').attr('x',W2-4).attr('y',yS2(noiseVal)-3)
+    .attr('text-anchor','end').attr('fill','rgba(58,171,170,0.7)').attr('font-size',8)
+    .text('+σ');
+  g2.append('text').attr('x',W2-4).attr('y',yS2(-noiseVal)+9)
+    .attr('text-anchor','end').attr('fill','rgba(58,171,170,0.7)').attr('font-size',8)
+    .text('−σ');
+
+  // residual stems + dots
+  xSensors.forEach((x,i)=>{
+    const col = residuals[i]>0 ? '#2c7bb6' : '#e05c2a';
+    g2.append('line')
+      .attr('x1',xS2(x)).attr('x2',xS2(x))
+      .attr('y1',yS2(0)).attr('y2',yS2(residuals[i]))
+      .attr('stroke',col).attr('stroke-width',1.5).attr('opacity',0.7);
+    g2.append('circle')
+      .attr('cx',xS2(x)).attr('cy',yS2(residuals[i])).attr('r',3.5)
+      .attr('fill',col).attr('opacity',0.85);
+  });
+
+  // ── Residual note ─────────────────────────────────────────
+  const systematic = detectBias(xSensors, residuals);
+  document.getElementById('residNote').innerHTML = systematic
+    ? `⚠ <span style="color:#d9534f; font-style:normal; font-family:Inter,sans-serif; font-weight:600;">Systematic bias detected</span> — residuals are not randomly scattered around zero. 
+       This suggests the model assumption (α, BCs, or IC) may be wrong. Try adjusting α above.`
+    : `✓ <span style="color:#3aabaa; font-style:normal; font-family:Inter,sans-serif; font-weight:600;">Residuals look random</span> — scattered symmetrically around zero within ±σ band (teal). 
+       No systematic trend detected. The analytical model is consistent with the data.`;
+}
+
+// Simple bias check: do residuals have a spatial trend?
+function detectBias(xs, res) {
+  // Spearman-like: check if mean of left half vs right half are strongly different
+  const mid = d3.mean(xs);
+  const left  = res.filter((_,i)=>xs[i]<mid);
+  const right = res.filter((_,i)=>xs[i]>=mid);
+  const mL = d3.mean(left), mR = d3.mean(right);
+  // Also check overall mean
+  const mAll = d3.mean(res);
+  const std  = Math.sqrt(d3.mean(res.map(r=>r*r)));
+  return Math.abs(mAll) > std*0.5 || Math.abs(mL-mR) > std*0.6;
+}
+
+// Initial render
+render();
+window.addEventListener('resize', render);
+</script>
+</body>
+</html>

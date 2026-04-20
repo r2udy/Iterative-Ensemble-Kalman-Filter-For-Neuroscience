@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Point Estimate vs. Ensemble</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #181c27;
+    --surface2: #1f2438;
+    --border: #2a2f45;
+    --text: #e8eaf0;
+    --muted: #7a80a0;
+    --point: #e05252;
+    --ensemble: #4db87a;
+    --gold: #f0c060;
+    --blue: #5b8ef0;
+    --accent: #9d6ef5;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    line-height: 1.75;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 64px 40px 80px;
+  }
+
+  /* Header */
+  .header-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 2.8rem;
+    line-height: 1.15;
+    margin-bottom: 20px;
+  }
+  h1 .pt { color: var(--point); }
+  h1 .en { color: var(--ensemble); }
+  .intro {
+    font-size: 1.05rem;
+    color: #b0b4c8;
+    max-width: 680px;
+    margin-bottom: 60px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 40px;
+  }
+
+  h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.5rem;
+    margin: 56px 0 18px;
+    color: var(--text);
+  }
+  h2 .pt { color: var(--point); }
+  h2 .en { color: var(--ensemble); }
+  p { margin-bottom: 16px; font-size: 1rem; color: #c8ccd8; }
+  strong { color: var(--text); font-weight: 500; }
+
+  /* Two-column compare */
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 32px 0;
+    border: 1px solid var(--border);
+  }
+  .compare-header {
+    padding: 14px 22px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .compare-header.pt { background: rgba(224,82,82,0.15); color: var(--point); }
+  .compare-header.en { background: rgba(77,184,122,0.12); color: var(--ensemble); }
+  .compare-row {
+    display: contents;
+  }
+  .compare-cell {
+    padding: 14px 22px;
+    font-size: 0.92rem;
+    color: #b0b4c8;
+    border-top: 1px solid var(--border);
+  }
+  .compare-cell.pt { background: rgba(224,82,82,0.05); }
+  .compare-cell.en { background: rgba(77,184,122,0.04); }
+  .compare-cell strong { display: block; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .compare-cell.pt strong { color: var(--point); }
+  .compare-cell.en strong { color: var(--ensemble); }
+
+  /* Callout */
+  .callout {
+    background: var(--surface2);
+    border-left: 3px solid var(--gold);
+    padding: 18px 24px;
+    border-radius: 0 8px 8px 0;
+    margin: 28px 0;
+    font-size: 0.97rem;
+    color: #c8ccd8;
+  }
+  .callout .label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 6px;
+  }
+
+  /* Canvas demos */
+  .demo-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    margin: 32px 0;
+  }
+  .demo-wrap h3 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    margin-bottom: 6px;
+  }
+  .demo-wrap .demo-sub {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+  canvas { border-radius: 8px; display: block; width: 100%; }
+
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+  button {
+    padding: 9px 20px;
+    border-radius: 7px;
+    border: none;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.88rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  button:hover { opacity: 0.85; transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  .btn-pt { background: var(--point); color: white; }
+  .btn-en { background: var(--ensemble); color: #0f1117; }
+  .btn-ghost { background: transparent; border: 1.5px solid var(--border); color: var(--muted); }
+  .btn-ghost:hover { border-color: var(--muted); }
+  .status-txt { font-size: 0.82rem; color: var(--muted); font-style: italic; }
+
+  /* Landscape of solutions */
+  #landscape-canvas { height: 220px; }
+
+  /* Step list */
+  .steps { list-style: none; margin: 20px 0; }
+  .steps li {
+    display: flex;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.97rem;
+    color: #b0b4c8;
+  }
+  .steps li:last-child { border-bottom: none; }
+  .step-num {
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem; font-weight: 500;
+  }
+  .step-num.pt { background: rgba(224,82,82,0.2); color: var(--point); }
+  .step-num.en { background: rgba(77,184,122,0.2); color: var(--ensemble); }
+
+  /* Takeaway box */
+  .takeaway {
+    background: linear-gradient(135deg, rgba(77,184,122,0.08), rgba(91,142,240,0.08));
+    border: 1px solid rgba(77,184,122,0.25);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin: 50px 0 30px;
+  }
+  .takeaway .tq-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ensemble);
+    margin-bottom: 10px;
+  }
+  .takeaway p { color: #c8ccd8; margin: 0; font-size: 1.02rem; }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="header-label">IEnKF · Conceptual Guide for Biologists</div>
+<h1>The <span class="pt">Single Best Guess</span><br>vs. a <span class="en">Population of Hypotheses</span></h1>
+<p class="intro">When you fit a model to biological data, you face a fundamental choice: commit to one answer, or track many. This page explains what that choice means, why it matters, and what you lose when you pick only one.</p>
+
+
+<!-- ═══════════════ SECTION 1 ═══════════════ -->
+<h2>What Is a <span class="pt">Point Estimate</span>?</h2>
+
+<p>A point estimate is a single set of parameter values — one number (or vector of numbers) that your fitting procedure declares to be "the answer." The classic example is <strong>nonlinear least squares (NLS)</strong>: you define a cost function — the sum of squared differences between model predictions and data — and you minimise it.</p>
+
+<p>The algorithm climbs (or descends) a landscape of possible parameter values, looking for the lowest point. Where it stops, that is your estimate. You get one location in parameter space: a point.</p>
+
+<div class="callout">
+  <div class="label">🔬 Biological example</div>
+  You measure a dose-response curve for a receptor. You fit a Hill equation using NLS. The algorithm returns: EC₅₀ = 14.3 nM, Hill coefficient n = 1.8. Those two numbers are your point estimate. The entire uncertainty in your experiment has been compressed into two figures.
+</div>
+
+<!-- Interactive landscape -->
+<div class="demo-wrap">
+  <h3>The Cost Landscape: NLS finds the lowest point</h3>
+  <div class="demo-sub">One parameter shown. NLS descends until it reaches the minimum — a single answer.</div>
+  <canvas id="landscape-canvas" height="220"></canvas>
+  <div class="btn-row">
+    <button class="btn-pt" onclick="runNLS()">Run NLS optimisation</button>
+    <button class="btn-ghost" onclick="resetLandscape()">Reset</button>
+    <span class="status-txt" id="nls-status">Click to watch gradient descent find the minimum.</span>
+  </div>
+</div>
+
+
+<!-- ═══════════════ SECTION 2 ═══════════════ -->
+<h2>The Hidden Problem: <span class="pt">What a Point Doesn't Tell You</span></h2>
+
+<p>The minimum the algorithm finds is real — but it hides everything around it. The landscape might be a deep, narrow well (you're very confident), or a broad shallow bowl (many parameter values fit almost equally well), or it might have <strong>multiple minima</strong> — several completely different biological explanations that all fit the data nearly equally.</p>
+
+<p>NLS hands you one point and declares victory. It doesn't tell you:</p>
+
+<ul style="padding-left: 22px; margin: 12px 0 20px; color: #b0b4c8;">
+  <li style="margin-bottom: 8px;">How <strong>wide</strong> the minimum is (parameter uncertainty)</li>
+  <li style="margin-bottom: 8px;">Whether there are <strong>other minima</strong> you missed (multiple solutions)</li>
+  <li style="margin-bottom: 8px;">How <strong>correlated</strong> parameters are with each other (identifiability)</li>
+  <li style="margin-bottom: 8px;">How uncertainty in parameters <strong>propagates</strong> into model predictions</li>
+</ul>
+
+<!-- Wide vs narrow well demo -->
+<div class="demo-wrap">
+  <h3>Same minimum, very different certainty</h3>
+  <div class="demo-sub">NLS finds the same point in both cases — but the biological meaning is completely different.</div>
+  <canvas id="well-canvas" height="200"></canvas>
+  <div class="btn-row">
+    <button class="btn-ghost" onclick="setWell('narrow')">Narrow well</button>
+    <button class="btn-ghost" onclick="setWell('wide')">Wide well</button>
+    <button class="btn-ghost" onclick="setWell('multi')">Multiple minima</button>
+    <span class="status-txt" id="well-status">Select a landscape type.</span>
+  </div>
+</div>
+
+<div class="callout">
+  <div class="label">🧬 Why this wrecks biological inference</div>
+  In systems biology, parameters are often <strong>practically unidentifiable</strong> — the cost landscape is flat in some directions. Two completely different values of, say, a degradation rate might fit your mRNA time-course equally well because you didn't measure the right quantity. NLS will give you one of them confidently. It has no way to tell you the other exists.
+</div>
+
+
+<!-- ═══════════════ SECTION 3 ═══════════════ -->
+<h2>What the <span class="en">Ensemble</span> Does Instead</h2>
+
+<p>Rather than finding one minimum, the ensemble approach places <strong>many particles across the landscape</strong>. Each ensemble member is a candidate location — a full hypothesis about what the parameters (and state variables) might be. The collection of members describes not just where the best guess is, but <strong>the shape of the uncertainty</strong> around it.</p>
+
+<!-- Ensemble on landscape demo -->
+<div class="demo-wrap">
+  <h3>Ensemble members explore the landscape together</h3>
+  <div class="demo-sub">Members spread across plausible regions, then update when data arrives. Compare with NLS above.</div>
+  <canvas id="ensemble-canvas" height="220"></canvas>
+  <div class="btn-row">
+    <button class="btn-en" onclick="runEnsemble()">Spread ensemble</button>
+    <button class="btn-ghost" onclick="updateEnsemble()">Update with data</button>
+    <button class="btn-ghost" onclick="resetEnsemble()">Reset</button>
+    <span class="status-txt" id="ens-status">Start by spreading the ensemble across the prior.</span>
+  </div>
+</div>
+
+<p>After the update, the ensemble has not collapsed to one point — it has <em>narrowed</em>. You now see both where the best answer is <strong>and</strong> how confident you should be. Members in flat regions of the landscape remain spread out; members near a sharp minimum cluster tightly.</p>
+
+
+<!-- ═══════════════ SECTION 4 ═══════════════ -->
+<h2>Side-by-Side: How the Two Approaches Differ</h2>
+
+<div class="compare">
+  <div class="compare-header pt">⚫ Point estimate · NLS</div>
+  <div class="compare-header en">🟢 Ensemble · IEnKF</div>
+
+  <div class="compare-cell pt"><strong>What you track</strong>One vector x* — the minimum</div>
+  <div class="compare-cell en"><strong>What you track</strong>N vectors {x₁, x₂, …, xₙ} — a population</div>
+
+  <div class="compare-cell pt"><strong>Uncertainty</strong>Approximated post-hoc from the Hessian (curvature at the minimum) — often unreliable for nonlinear models</div>
+  <div class="compare-cell en"><strong>Uncertainty</strong>Built-in: the spread of members is the uncertainty, updated live with each observation</div>
+
+  <div class="compare-cell pt"><strong>Multiple solutions</strong>Finds one minimum; may miss others entirely depending on starting point</div>
+  <div class="compare-cell en"><strong>Multiple solutions</strong>Members can sit in different basins simultaneously, revealing multimodality</div>
+
+  <div class="compare-cell pt"><strong>Nonlinearity</strong>Linearises around the current point (Jacobian); can diverge far from the minimum</div>
+  <div class="compare-cell en"><strong>Nonlinearity</strong>Each member runs the full nonlinear model; ensemble statistics capture nonlinear structure</div>
+
+  <div class="compare-cell pt"><strong>Parameter correlation</strong>Captured only locally (covariance from Hessian inverse); ignores global structure</div>
+  <div class="compare-cell en"><strong>Parameter correlation</strong>Captured globally: cross-member covariance reflects the true joint uncertainty</div>
+
+  <div class="compare-cell pt"><strong>Biological output</strong>"The Hill coefficient is 1.8"</div>
+  <div class="compare-cell en"><strong>Biological output</strong>"The Hill coefficient is 1.8 ± 0.4, with 12% of members suggesting n < 1 (non-cooperative regime)"</div>
+</div>
+
+
+<!-- ═══════════════ SECTION 5 ═══════════════ -->
+<h2>A Concrete Biological Story</h2>
+
+<p>Suppose you're fitting a model of the p53–Mdm2 oscillator to single-cell fluorescence data. You have 5 measured time points and 8 unknown parameters (rate constants, degradation rates, binding affinities).</p>
+
+<ul class="steps">
+  <li>
+    <span class="step-num pt">1</span>
+    <span><strong style="color:var(--point)">NLS approach:</strong> Start from an initial guess, minimise the squared residuals. Converge to one parameter set. Run your model forward — get one predicted trajectory. Your collaborator asks: "How sure are you?" You run bootstrap resampling or compute a Hessian — a slow, fragile process. You report confidence intervals that assume the model is nearly linear near the solution, which for a p53 oscillator, it is not.</span>
+  </li>
+  <li>
+    <span class="step-num en">1</span>
+    <span><strong style="color:var(--ensemble)">IEnKF approach:</strong> Initialise 50 ensemble members by sampling from a prior distribution over the 8 parameters (e.g., log-uniform over physiological ranges). Each member is one complete model parameterisation. As each time point arrives, all 50 members update together. After assimilating all 5 time points, you have 50 plausible parameter sets and 50 predicted trajectories. The spread of those trajectories is your uncertainty — no post-hoc computation needed.</span>
+  </li>
+</ul>
+
+
+<!-- ═══════════════ TAKEAWAY ═══════════════ -->
+<div class="takeaway">
+  <div class="tq-label">The core difference, in one sentence</div>
+  <p>Nonlinear least squares asks <em>"what is the best parameter set?"</em> and returns a single answer with no memory of the surrounding landscape. The IEnKF asks <em>"what is the distribution of plausible parameter sets, given the data?"</em> and answers with a living population that carries uncertainty forward through every subsequent prediction.</p>
+</div>
+
+<p style="color:#8a90a8; font-size:0.92rem;">For biological systems — which are nonlinear, noisy, partially observed, and often parameter-unidentifiable — knowing the shape of uncertainty is not a luxury. It determines whether your model prediction is a reliable forecast or a false confidence.</p>
+
+<footer>Point estimate vs. ensemble · IEnKF explainer for biology audiences</footer>
+
+
+<script>
+// ═══ Utility ═══
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function easeOut(t) { return 1 - (1-t)*(1-t); }
+
+// ═══ LANDSCAPE (NLS) ═══
+const lc = document.getElementById('landscape-canvas');
+const lctx = lc.getContext('2d');
+let nlsAnim = null, nlsX = 0.15, nlsRunning = false;
+
+function landscapeFn(x) {
+  return 0.55 * Math.pow(x - 0.62, 2) + 0.08 * Math.sin(x * 18) * Math.exp(-12*(x-0.4)*(x-0.4)) + 0.02;
+}
+
+function drawLandscape(highlightX) {
+  const W = lc.offsetWidth, H = lc.offsetHeight;
+  lc.width = W; lc.height = H;
+  const pad = {l:40, r:20, t:20, b:40};
+  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+
+  // Axes
+  lctx.strokeStyle = '#2a2f45';
+  lctx.lineWidth = 1;
+  lctx.beginPath(); lctx.moveTo(pad.l, pad.t); lctx.lineTo(pad.l, pad.t+ph); lctx.lineTo(pad.l+pw, pad.t+ph); lctx.stroke();
+  lctx.fillStyle = '#5a6080'; lctx.font = '11px DM Sans';
+  lctx.fillText('Parameter value (e.g. EC₅₀)', pad.l + pw/2 - 60, H - 6);
+  lctx.save(); lctx.translate(12, pad.t+ph/2); lctx.rotate(-Math.PI/2);
+  lctx.fillText('Cost (sum of squared residuals)', -60, 0); lctx.restore();
+
+  // Curve
+  const pts = [];
+  for (let i = 0; i <= 200; i++) {
+    const x = i / 200;
+    const y = landscapeFn(x);
+    pts.push([pad.l + x*pw, pad.t + ph - y*ph*2.2]);
+  }
+  const grad = lctx.createLinearGradient(0, pad.t, 0, pad.t+ph);
+  grad.addColorStop(0, 'rgba(224,82,82,0.7)');
+  grad.addColorStop(1, 'rgba(224,82,82,0.15)');
+  lctx.beginPath(); pts.forEach(([px,py],i)=>i===0?lctx.moveTo(px,py):lctx.lineTo(px,py));
+  lctx.strokeStyle = 'rgba(224,82,82,0.9)'; lctx.lineWidth = 2.5; lctx.stroke();
+
+  // Fill under curve
+  lctx.beginPath(); pts.forEach(([px,py],i)=>i===0?lctx.moveTo(px,py):lctx.lineTo(px,py));
+  lctx.lineTo(pad.l+pw, pad.t+ph); lctx.lineTo(pad.l, pad.t+ph); lctx.closePath();
+  lctx.fillStyle = 'rgba(224,82,82,0.06)'; lctx.fill();
+
+  if (highlightX !== undefined) {
+    const x = highlightX;
+    const y = landscapeFn(x);
+    const px = pad.l + x*pw;
+    const py = pad.t + ph - y*ph*2.2;
+    // Vertical drop line
+    lctx.setLineDash([4,4]);
+    lctx.strokeStyle = 'rgba(224,82,82,0.35)';
+    lctx.lineWidth = 1;
+    lctx.beginPath(); lctx.moveTo(px, pad.t); lctx.lineTo(px, py); lctx.stroke();
+    lctx.setLineDash([]);
+    // Dot
+    lctx.beginPath(); lctx.arc(px, py, 7, 0, Math.PI*2);
+    lctx.fillStyle = '#e05252'; lctx.fill();
+    lctx.strokeStyle = '#fff'; lctx.lineWidth = 2; lctx.stroke();
+    // Label
+    if (x > 0.55 && x < 0.7) {
+      lctx.fillStyle = '#e05252'; lctx.font = 'bold 11px DM Sans';
+      lctx.fillText('✓ Minimum found', px + 10, py - 10);
+    }
+  }
+}
+
+function resetLandscape() {
+  if (nlsAnim) cancelAnimationFrame(nlsAnim);
+  nlsRunning = false; nlsX = 0.15;
+  drawLandscape(nlsX);
+  document.getElementById('nls-status').textContent = 'Click to watch gradient descent find the minimum.';
+}
+
+function runNLS() {
+  if (nlsRunning) return;
+  nlsRunning = true;
+  nlsX = 0.15;
+  let t = 0;
+  const target = 0.618;
+  function step() {
+    t += 0.018;
+    nlsX = lerp(0.15, target, easeOut(clamp(t, 0, 1)));
+    drawLandscape(nlsX);
+    const status = document.getElementById('nls-status');
+    if (t < 1) {
+      status.textContent = 'Descending… parameter = ' + nlsX.toFixed(3);
+      nlsAnim = requestAnimationFrame(step);
+    } else {
+      nlsRunning = false;
+      status.textContent = '⚫ Converged. Point estimate: EC₅₀ ≈ ' + target.toFixed(3) + '. One answer, no uncertainty info.';
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+// ═══ WELL CANVAS ═══
+const wc = document.getElementById('well-canvas');
+const wctx = wc.getContext('2d');
+let wellMode = 'narrow';
+
+function wellFn(x, mode) {
+  if (mode === 'narrow') return 3.5 * Math.pow(x - 0.5, 2) + 0.01;
+  if (mode === 'wide')   return 0.4 * Math.pow(x - 0.5, 2) + 0.01;
+  if (mode === 'multi')  return 0.8*Math.pow(x-0.5,2) - 0.18*Math.cos(12*(x-0.5)) + 0.1;
+}
+
+function drawWell(mode) {
+  const W = wc.offsetWidth, H = wc.offsetHeight;
+  wc.width = W; wc.height = H;
+  const pad = {l:30, r:20, t:20, b:36};
+  const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+
+  const color = mode === 'multi' ? '#f0c060' : (mode === 'narrow' ? '#e05252' : '#5b8ef0');
+
+  const pts = [];
+  for (let i = 0; i <= 200; i++) {
+    const x = i/200;
+    const y = wellFn(x, mode);
+    pts.push([pad.l + x*pw, pad.t + ph - clamp(y*ph*1.6, 0, ph)]);
+  }
+  wctx.beginPath(); pts.forEach(([px,py],i)=>i===0?wctx.moveTo(px,py):wctx.lineTo(px,py));
+  wctx.strokeStyle = color; wctx.lineWidth = 2.5; wctx.stroke();
+  wctx.beginPath(); pts.forEach(([px,py],i)=>i===0?wctx.moveTo(px,py):wctx.lineTo(px,py));
+  wctx.lineTo(pad.l+pw, pad.t+ph); wctx.lineTo(pad.l, pad.t+ph); wctx.closePath();
+  wctx.fillStyle = color.replace(')', ',0.07)').replace('rgb', 'rgba'); wctx.fill();
+
+  // Mark minimum(s)
+  const minima = mode === 'multi' ? [0.26, 0.5, 0.74] : [0.5];
+  minima.forEach(mx => {
+    const my = wellFn(mx, mode);
+    const px = pad.l + mx*pw;
+    const py = pad.t + ph - clamp(my*ph*1.6, 0, ph);
+    wctx.beginPath(); wctx.arc(px, py, 6, 0, Math.PI*2);
+    wctx.fillStyle = color; wctx.fill();
+    wctx.strokeStyle = '#fff'; wctx.lineWidth = 2; wctx.stroke();
+  });
+
+  // Annotation
+  const msgs = {
+    narrow: 'Narrow well → high confidence. Small parameter change = large cost increase. NLS gives a reliable answer.',
+    wide:   'Wide well → low confidence. Many parameter values fit almost equally well. NLS gives one but could have given many.',
+    multi:  'Multiple minima → NLS finds whichever it lands in first. The other solutions are biologically real — and invisible.'
+  };
+  wctx.fillStyle = color; wctx.font = '12px DM Sans';
+  wctx.fillText(msgs[mode], pad.l + 4, H - 8);
+  document.getElementById('well-status').textContent = msgs[mode];
+}
+
+function setWell(mode) { wellMode = mode; drawWell(mode); }
+drawWell('narrow');
+
+// ═══ ENSEMBLE CANVAS ═══
+const ec = document.getElementById('ensemble-canvas');
+const ectx = ec.getContext('2d');
+let ensMembers = [];
+let ensState = 'empty';
+
+function ensFn(x) {
+  return 0.55*Math.pow(x-0.62,2) + 0.08*Math.sin(x*18)*Math.exp(-12*(x-0.4)*(x-0.4)) + 0.02;
+}
+
+function gaussian(m, s) {
+  let u=0,v=0;
+  while(!u) u=Math.random(); while(!v) v=Math.random();
+  return m + s*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
+function drawEnsembleCanvas() {
+  const W = ec.offsetWidth, H = ec.offsetHeight;
+  ec.width = W; ec.height = H;
+  const pad = {l:40,r:20,t:20,b:40};
+  const pw = W-pad.l-pad.r, ph = H-pad.t-pad.b;
+
+  // Axes
+  ectx.strokeStyle='#2a2f45'; ectx.lineWidth=1;
+  ectx.beginPath(); ectx.moveTo(pad.l,pad.t); ectx.lineTo(pad.l,pad.t+ph); ectx.lineTo(pad.l+pw,pad.t+ph); ectx.stroke();
+  ectx.fillStyle='#5a6080'; ectx.font='11px DM Sans';
+  ectx.fillText('Parameter value', pad.l+pw/2-40, H-6);
+
+  // Curve
+  const pts=[];
+  for(let i=0;i<=200;i++){const x=i/200;pts.push([pad.l+x*pw, pad.t+ph-ensFn(x)*ph*2.2]);}
+  ectx.beginPath(); pts.forEach(([px,py],i)=>i===0?ectx.moveTo(px,py):ectx.lineTo(px,py));
+  ectx.strokeStyle='rgba(77,184,122,0.4)'; ectx.lineWidth=2; ectx.stroke();
+
+  // Members
+  ensMembers.forEach(m => {
+    const px = pad.l + m.x*pw;
+    const py = pad.t + ph - ensFn(m.x)*ph*2.2;
+    ectx.beginPath(); ectx.arc(px, py, 5, 0, Math.PI*2);
+    ectx.fillStyle = m.updated ? '#4db87a' : 'rgba(77,184,122,0.55)';
+    ectx.fill();
+    if (m.updated) { ectx.strokeStyle='#fff'; ectx.lineWidth=1.5; ectx.stroke(); }
+  });
+
+  // Mean marker
+  if (ensMembers.length > 0) {
+    const mx = ensMembers.reduce((a,b)=>a+b.x,0)/ensMembers.length;
+    const px = pad.l + mx*pw;
+    const py = pad.t + ph - ensFn(mx)*ph*2.2;
+    ectx.beginPath(); ectx.arc(px, py, 9, 0, Math.PI*2);
+    ectx.fillStyle='#4db87a'; ectx.fill();
+    ectx.strokeStyle='#fff'; ectx.lineWidth=2.5; ectx.stroke();
+    ectx.fillStyle='#0f1117'; ectx.font='bold 10px DM Sans'; ectx.textAlign='center';
+    ectx.fillText('μ', px, py+4);
+    ectx.textAlign='left';
+  }
+}
+
+function resetEnsemble() {
+  ensMembers=[]; ensState='empty';
+  drawEnsembleCanvas();
+  document.getElementById('ens-status').textContent='Start by spreading the ensemble across the prior.';
+}
+
+function runEnsemble() {
+  ensMembers = Array.from({length:40}, ()=>({x:clamp(gaussian(0.5,0.22),0.02,0.98), updated:false}));
+  ensState='spread';
+  drawEnsembleCanvas();
+  document.getElementById('ens-status').textContent='40 members spread across prior. Each is a complete biological hypothesis. Now click Update.';
+}
+
+function updateEnsemble() {
+  if (ensState==='empty') { document.getElementById('ens-status').textContent='Spread the ensemble first!'; return; }
+  const obs = 0.62;
+  ensMembers = ensMembers.map(m => {
+    const kg = 0.55;
+    return {x: clamp(m.x + kg*(obs-m.x) + gaussian(0,0.018), 0.02, 0.98), updated:true};
+  });
+  ensState='updated';
+  const mean = ensMembers.reduce((a,b)=>a+b.x,0)/ensMembers.length;
+  const std = Math.sqrt(ensMembers.reduce((a,b)=>a+(b.x-mean)**2,0)/ensMembers.length);
+  drawEnsembleCanvas();
+  document.getElementById('ens-status').textContent=`✓ Updated. Ensemble mean = ${mean.toFixed(3)}, spread (std) = ${std.toFixed(3)}. Uncertainty is now visible.`;
+}
+
+// Init draws
+resetLandscape();
+resetEnsemble();
+
+// Redraw on resize
+window.addEventListener('resize', ()=>{
+  drawLandscape(nlsRunning ? undefined : (nlsX > 0.6 ? nlsX : undefined));
+  drawWell(wellMode);
+  drawEnsembleCanvas();
+});
+</script>
+</body>
+</html>

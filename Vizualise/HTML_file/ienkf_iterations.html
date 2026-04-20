@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEnKF · Ensemble Evolution</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=Inclusive+Sans&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #06080f;
+    --panel: #0d1120;
+    --border: #1e2540;
+    --text: #dde2f0;
+    --muted: #5a6285;
+    --prior-col: #6ec6f5;
+    --obs-col: #f5a623;
+    --post-col: #6df0a8;
+    --iter1: #a78bfa;
+    --iter2: #60a5fa;
+    --iter3: #34d399;
+    --iter4: #f0c060;
+    --iter5: #f87171;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inclusive Sans', sans-serif;
+    min-height: 100vh;
+    padding: 48px 32px 60px;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    font-size: 0.68rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-size: 2.4rem;
+    font-weight: 300;
+    line-height: 1.2;
+    margin-bottom: 10px;
+    color: var(--text);
+  }
+  h1 em { font-style: italic; color: var(--post-col); }
+  .subtitle {
+    font-size: 0.95rem;
+    color: var(--muted);
+    max-width: 600px;
+    line-height: 1.7;
+    margin-bottom: 44px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Main stage ── */
+  .stage {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+  #main-canvas { display: block; width: 100%; }
+
+  /* ── Step label overlay ── */
+  .step-badge {
+    position: absolute;
+    top: 18px; left: 20px;
+    background: rgba(6,8,15,0.85);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    backdrop-filter: blur(8px);
+  }
+  .step-badge .step-num {
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .step-badge .step-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .step-badge .step-desc {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 4px;
+    max-width: 220px;
+    line-height: 1.5;
+  }
+
+  /* ── Iteration track ── */
+  .iter-track {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .iter-dot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 30px;
+    border: 1.5px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.25s;
+    background: var(--panel);
+  }
+  .iter-dot:hover { border-color: #3a4060; color: var(--text); }
+  .iter-dot.active { color: var(--text); border-color: currentColor; }
+  .iter-dot .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Controls ── */
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 32px;
+  }
+  button {
+    font-family: 'Inclusive Sans', sans-serif;
+    font-size: 0.88rem;
+    padding: 10px 22px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #play-btn {
+    background: var(--post-col);
+    color: #04100a;
+    font-weight: 700;
+    min-width: 130px;
+  }
+  #play-btn:hover { filter: brightness(1.1); }
+  .btn-ghost {
+    background: transparent;
+    border: 1.5px solid var(--border);
+    color: var(--muted);
+  }
+  .btn-ghost:hover { border-color: var(--muted); color: var(--text); }
+  .speed-label { font-size: 0.78rem; color: var(--muted); }
+  input[type=range] {
+    accent-color: var(--post-col);
+    width: 90px;
+    cursor: pointer;
+  }
+
+  /* ── Distribution strip ── */
+  .strip-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .strip-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 28px;
+  }
+  .strip-canvas-wrap {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+  .strip-canvas-wrap canvas { display: block; width: 100%; }
+  .strip-lbl {
+    position: absolute;
+    bottom: 6px; left: 0; right: 0;
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .strip-canvas-wrap.active-strip {
+    border-color: var(--post-col);
+    box-shadow: 0 0 0 2px rgba(109,240,168,0.18);
+  }
+
+  /* ── Annotation ── */
+  .annotation {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    font-size: 0.9rem;
+    color: #8090b0;
+    line-height: 1.75;
+  }
+  .annotation strong { color: var(--text); font-weight: 600; }
+  .annotation .obs-tag {
+    display: inline-block;
+    background: rgba(245,166,35,0.15);
+    color: var(--obs-col);
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="eyebrow">IEnKF · Visual Explainer</div>
+<h1>From Ignorance to Knowledge —<br><em>Iteratively</em></h1>
+<p class="subtitle">Each point is one ensemble member — one complete hypothesis about the system state. Watch how the IEnKF transforms a near-uniform cloud of uncertainty into a tight Gaussian centered on the truth, one observation at a time.</p>
+
+<!-- Iteration selector -->
+<div class="iter-track" id="iter-track"></div>
+
+<!-- Main canvas stage -->
+<div class="stage">
+  <canvas id="main-canvas" height="340"></canvas>
+  <div class="step-badge">
+    <div class="step-num" id="badge-step">Step 0</div>
+    <div class="step-title" id="badge-title">Prior ensemble</div>
+    <div class="step-desc" id="badge-desc">50 members sampled uniformly — we know almost nothing yet.</div>
+  </div>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <button id="play-btn" onclick="togglePlay()">▶ Play</button>
+  <button class="btn-ghost" onclick="stepForward()">Next step →</button>
+  <button class="btn-ghost" onclick="resetAll()">↺ Reset</button>
+  <span class="speed-label">Speed</span>
+  <input type="range" id="speed" min="1" max="5" value="3">
+</div>
+
+<!-- Strip overview -->
+<div class="strip-label">All iterations at a glance — 1D marginal distribution</div>
+<div class="strip-row" id="strip-row"></div>
+
+<!-- Annotation -->
+<div class="annotation" id="annotation">
+  <strong>Prior (step 0):</strong> The ensemble is spread nearly uniformly across the full plausible range of the parameter. Every member is equally valid — we've encoded our ignorance. This is the starting distribution <em>p(x)</em> before any data is seen.
+</div>
+
+<script>
+// ════════════════════════════════════════════
+//  CONFIG
+// ════════════════════════════════════════════
+const N = 60;          // ensemble size
+const TRUE_VAL = 0.62; // true parameter (2D: [0.62, 0.45])
+const TRUE_Y   = 0.45;
+const OBS_NOISE = 0.06;
+
+const COLORS = ['#6ec6f5','#a78bfa','#60a5fa','#34d399','#f0c060','#f87171'];
+const ITER_NAMES = ['Prior','Iter 1','Iter 2','Iter 3','Iter 4','Posterior'];
+const ITER_DESCS = [
+  'Near-uniform prior. All hypotheses equally weighted — maximum uncertainty.',
+  'First observation assimilated. Members shift toward the data; cloud starts to lean.',
+  'Second observation tightens the cloud. Correlations between parameters emerge.',
+  'Third iteration: the ellipse is noticeably smaller. Uncertainty shrinking fast.',
+  'Fourth iteration: members cluster strongly. The posterior shape is Gaussian-like.',
+  'Final posterior. A tight Gaussian centred on the truth. Uncertainty is quantified, not eliminated.'
+];
+
+const ANNOTATIONS = [
+  `<strong>Prior (step 0):</strong> The ensemble is spread nearly uniformly across the full plausible range. Every member is equally valid — we've encoded our ignorance. This is <em>p(x)</em> before any data is seen.`,
+  `<strong>After iteration 1:</strong> One <span class="obs-tag">observation</span> arrives. Each member is updated via the Kalman gain: members far from the observation are nudged toward it. The cloud shifts and slightly compresses — but remains broad. We've learned <em>something</em>, not <em>everything</em>.`,
+  `<strong>After iteration 2:</strong> A second <span class="obs-tag">observation</span> (possibly the same measurement, re-linearised around the improved mean) further tightens the cloud. You can begin to see a preferred direction — a correlation between the two parameters. This is the ensemble capturing <em>joint uncertainty</em>.`,
+  `<strong>After iteration 3:</strong> The ensemble has contracted substantially. Members that are inconsistent with all observations have been pulled in or are now outliers at the fringe. The cloud is beginning to look elliptical — the signature of a Gaussian in 2D.`,
+  `<strong>After iteration 4:</strong> Nearly Gaussian now. The iterative re-linearisation of IEnKF (vs. standard EnKF) is what achieves this tight result for nonlinear systems. A linear model would have converged in 1–2 steps; biology needs more.`,
+  `<strong>Posterior (final):</strong> The ensemble has converged to a tight Gaussian centred very close to the <span class="obs-tag">true value</span>. The spread remaining is real, calibrated uncertainty — not ignorance. This is what NLS cannot give you.`
+];
+
+// ════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════
+let currentStep = 0;
+let playing = false;
+let playTimer = null;
+let members = []; // array of {x, y} per step: shape [steps][N]
+
+function randn() {
+  let u=0,v=0; while(!u) u=Math.random(); while(!v) v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
+function generateEnsemble() {
+  members = [];
+  // Step 0: near-uniform
+  const s0 = Array.from({length:N}, ()=>({ x:0.05+Math.random()*0.9, y:0.05+Math.random()*0.9 }));
+  members.push(s0);
+
+  // Steps 1–5: iteratively pull toward truth with decreasing spread
+  const spreads = [0.22, 0.14, 0.09, 0.055, 0.03];
+  const weights  = [0.35, 0.55, 0.72, 0.88,  0.97];
+
+  for (let iter = 0; iter < 5; iter++) {
+    const prev = members[iter];
+    const kg = weights[iter];
+    const sp = spreads[iter];
+    const next = prev.map(m => ({
+      x: clamp(lerp(m.x, TRUE_VAL, kg * (0.7 + 0.3*Math.random())) + randn()*sp, 0.02, 0.98),
+      y: clamp(lerp(m.y, TRUE_Y,   kg * (0.7 + 0.3*Math.random())) + randn()*sp, 0.02, 0.98)
+    }));
+    members.push(next);
+  }
+}
+
+function lerp(a,b,t){ return a+(b-a)*t; }
+function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
+
+// ════════════════════════════════════════════
+//  DRAW MAIN CANVAS (2D scatter)
+// ════════════════════════════════════════════
+const mc = document.getElementById('main-canvas');
+const mctx = mc.getContext('2d');
+
+function drawMain(step, progress=1) {
+  const W = mc.offsetWidth, H = 340;
+  mc.width = W; mc.height = H;
+
+  const pad = 52;
+  const pw = W - pad*2, ph = H - pad*2;
+
+  // Grid
+  mctx.strokeStyle = '#12172a';
+  mctx.lineWidth = 1;
+  for (let i=0; i<=4; i++) {
+    const x = pad + i/4*pw, y = pad + i/4*ph;
+    mctx.beginPath(); mctx.moveTo(x,pad); mctx.lineTo(x,pad+ph); mctx.stroke();
+    mctx.beginPath(); mctx.moveTo(pad,y); mctx.lineTo(pad+pw,y); mctx.stroke();
+  }
+
+  // Axes labels
+  mctx.fillStyle = '#3a4060'; mctx.font = '11px Inclusive Sans';
+  mctx.fillText('Parameter 1 (e.g. R_0)', pad + pw/2 - 70, H - 12);
+  mctx.save(); mctx.translate(14, pad+ph/2); mctx.rotate(-Math.PI/2);
+  mctx.fillText('Parameter 2 (e.g. CMRO2)', -80, 0); mctx.restore();
+
+  // True value crosshair
+  const tx = pad + TRUE_VAL*pw, ty = pad + (1-TRUE_Y)*ph;
+  mctx.setLineDash([5,5]);
+  mctx.strokeStyle = 'rgba(245,166,35,0.25)'; mctx.lineWidth = 1;
+  mctx.beginPath(); mctx.moveTo(tx,pad); mctx.lineTo(tx,pad+ph); mctx.stroke();
+  mctx.beginPath(); mctx.moveTo(pad,ty); mctx.lineTo(pad+pw,ty); mctx.stroke();
+  mctx.setLineDash([]);
+
+  // True star
+  drawStar(mctx, tx, ty, 8, 'rgba(245,166,35,0.9)');
+  mctx.fillStyle='rgba(245,166,35,0.7)'; mctx.font='11px Inclusive Sans';
+  mctx.fillText('truth', tx+11, ty-8);
+
+  // Members — interpolate between steps if progress < 1
+  const cur = members[step];
+  const prev = step > 0 ? members[step-1] : cur;
+  const color = COLORS[step];
+
+  cur.forEach((m, i) => {
+    const pm = prev[i];
+    const mx = lerp(pm.x, m.x, progress);
+    const my = lerp(pm.y, m.y, progress);
+    const px = pad + mx*pw, py = pad + (1-my)*ph;
+
+    // Trail dot (previous position)
+    if (progress < 1 && step > 0) {
+      mctx.beginPath(); mctx.arc(pad + pm.x*pw, pad+(1-pm.y)*ph, 3, 0,Math.PI*2);
+      mctx.fillStyle = COLORS[step-1].replace(')', ',0.2)').replace('#','rgba(') || 'rgba(100,100,150,0.2)';
+      // simpler:
+      mctx.fillStyle = 'rgba(100,120,180,0.18)'; mctx.fill();
+    }
+
+    mctx.beginPath(); mctx.arc(px, py, 4.5, 0, Math.PI*2);
+    mctx.fillStyle = hexToRgba(color, 0.72); mctx.fill();
+    mctx.strokeStyle = hexToRgba(color, 0.4); mctx.lineWidth = 1; mctx.stroke();
+  });
+
+  // Ensemble mean
+  const mx2 = cur.reduce((a,b)=>a+b.x,0)/N;
+  const my2 = cur.reduce((a,b)=>a+b.y,0)/N;
+  const mpx = pad + lerp(prev.reduce((a,b)=>a+b.x,0)/N, mx2, progress)*pw;
+  const mpy = pad + (1-lerp(prev.reduce((a,b)=>a+b.y,0)/N, my2, progress))*ph;
+  mctx.beginPath(); mctx.arc(mpx, mpy, 8, 0, Math.PI*2);
+  mctx.fillStyle = color; mctx.fill();
+  mctx.strokeStyle = '#fff'; mctx.lineWidth = 2; mctx.stroke();
+  mctx.fillStyle = '#000'; mctx.font = 'bold 10px Inclusive Sans'; mctx.textAlign='center';
+  mctx.fillText('μ', mpx, mpy+4); mctx.textAlign='left';
+
+  // Covariance ellipse (rough)
+  drawEllipse(mctx, cur, pad, pw, ph, color);
+
+  // Step label
+  mctx.fillStyle = hexToRgba(color, 0.9);
+  mctx.font = 'bold 13px Inclusive Sans';
+  mctx.fillText(ITER_NAMES[step], W - pad - 90, pad + 20);
+}
+
+function drawEllipse(ctx, pts, pad, pw, ph, color) {
+  const n = pts.length;
+  const mx = pts.reduce((a,b)=>a+b.x,0)/n;
+  const my = pts.reduce((a,b)=>a+b.y,0)/n;
+  let sxx=0,syy=0,sxy=0;
+  pts.forEach(p=>{ sxx+=(p.x-mx)**2; syy+=(p.y-my)**2; sxy+=(p.x-mx)*(p.y-my); });
+  sxx/=n; syy/=n; sxy/=n;
+  const theta = 0.5*Math.atan2(2*sxy, sxx-syy);
+  const lam1 = (sxx+syy)/2 + Math.sqrt(((sxx-syy)/2)**2 + sxy**2);
+  const lam2 = (sxx+syy)/2 - Math.sqrt(((sxx-syy)/2)**2 + sxy**2);
+  const rx = 2*Math.sqrt(Math.max(0,lam1))*pw;
+  const ry = 2*Math.sqrt(Math.max(0,lam2))*ph;
+  ctx.save();
+  ctx.translate(pad+mx*pw, pad+(1-my)*ph);
+  ctx.rotate(-theta);
+  ctx.beginPath(); ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);
+  ctx.strokeStyle = hexToRgba(color, 0.35); ctx.lineWidth=1.5;
+  ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = hexToRgba(color, 0.05); ctx.fill();
+  ctx.restore();
+}
+
+function drawStar(ctx, cx, cy, r, color) {
+  ctx.save(); ctx.translate(cx,cy); ctx.fillStyle=color;
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const a=Math.PI/2+i*Math.PI*2/5;
+    const b=a+Math.PI/5;
+    ctx.lineTo(Math.cos(a)*r, -Math.sin(a)*r);
+    ctx.lineTo(Math.cos(b)*r*0.42, -Math.sin(b)*r*0.42);
+  }
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+
+function hexToRgba(hex, alpha) {
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ════════════════════════════════════════════
+//  DRAW STRIPS (1D marginal)
+// ════════════════════════════════════════════
+function buildStrips() {
+  const row = document.getElementById('strip-row');
+  row.innerHTML = '';
+  members.forEach((pts, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'strip-canvas-wrap';
+    wrap.id = 'strip-wrap-'+i;
+    wrap.onclick = () => jumpTo(i);
+    const c = document.createElement('canvas');
+    c.id = 'strip-'+i;
+    c.height = 80;
+    const lbl = document.createElement('div');
+    lbl.className = 'strip-lbl';
+    lbl.textContent = ITER_NAMES[i];
+    wrap.appendChild(c); wrap.appendChild(lbl);
+    row.appendChild(wrap);
+  });
+  members.forEach((pts, i) => drawStrip(i, pts));
+}
+
+function drawStrip(i, pts) {
+  const c = document.getElementById('strip-'+i);
+  if (!c) return;
+  const W = c.offsetWidth || 120, H = 80;
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const color = COLORS[i];
+  const pad = {l:8,r:8,t:10,b:18};
+  const pw = W-pad.l-pad.r, ph = H-pad.t-pad.b;
+
+  // KDE histogram
+  const bins = 20;
+  const counts = new Array(bins).fill(0);
+  pts.forEach(p=>{ const b=clamp(Math.floor(p.x*bins),0,bins-1); counts[b]++; });
+  const maxC = Math.max(...counts);
+
+  // Fill bars
+  counts.forEach((c2,b)=>{
+    const bx = pad.l + b/bins*pw;
+    const bw = pw/bins - 1;
+    const bh = (c2/maxC)*ph;
+    ctx.fillStyle = hexToRgba(color, 0.35);
+    ctx.fillRect(bx, pad.t+ph-bh, bw, bh);
+  });
+
+  // Smooth KDE line
+  ctx.beginPath();
+  for(let px=0;px<=pw;px++){
+    const xval = px/pw;
+    let kde=0;
+    pts.forEach(p=>{ const d=(xval-p.x)/0.08; kde+=Math.exp(-d*d/2); });
+    kde = kde/pts.length;
+    const y = pad.t+ph - kde*(ph/0.18);
+    px===0?ctx.moveTo(pad.l+px,y):ctx.lineTo(pad.l+px,y);
+  }
+  ctx.strokeStyle = hexToRgba(color,0.9); ctx.lineWidth=1.8; ctx.stroke();
+
+  // True value line
+  ctx.setLineDash([3,3]);
+  ctx.strokeStyle='rgba(245,166,35,0.6)'; ctx.lineWidth=1.2;
+  const tx2 = pad.l + TRUE_VAL*pw;
+  ctx.beginPath(); ctx.moveTo(tx2,pad.t); ctx.lineTo(tx2,pad.t+ph); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Axis
+  ctx.strokeStyle='#1e2540'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph); ctx.stroke();
+}
+
+// ════════════════════════════════════════════
+//  ITERATION TRACK DOTS
+// ════════════════════════════════════════════
+function buildIterTrack() {
+  const track = document.getElementById('iter-track');
+  track.innerHTML = '';
+  ITER_NAMES.forEach((name,i) => {
+    const d = document.createElement('div');
+    d.className = 'iter-dot' + (i===0?' active':'');
+    d.id = 'iter-dot-'+i;
+    d.style.setProperty('color', COLORS[i]);
+    d.onclick = () => jumpTo(i);
+    d.innerHTML = `<span class="dot" style="background:${COLORS[i]}"></span>${name}`;
+    track.appendChild(d);
+  });
+}
+
+function updateIterTrack(step) {
+  ITER_NAMES.forEach((_,i)=>{
+    const d=document.getElementById('iter-dot-'+i);
+    d.classList.toggle('active', i===step);
+  });
+  // strip highlight
+  for(let i=0;i<ITER_NAMES.length;i++){
+    const w=document.getElementById('strip-wrap-'+i);
+    if(w) w.classList.toggle('active-strip', i===step);
+  }
+}
+
+// ════════════════════════════════════════════
+//  ANIMATION
+// ════════════════════════════════════════════
+let animProgress = 1;
+let animFrame = null;
+
+function animateTo(step) {
+  cancelAnimationFrame(animFrame);
+  animProgress = 0;
+  const targetStep = step;
+  const speed = parseInt(document.getElementById('speed').value);
+  const dur = 900 / speed; // ms
+  const start = performance.now();
+
+  function frame(now) {
+    animProgress = clamp((now-start)/dur, 0, 1);
+    const eased = animProgress < 0.5 ? 2*animProgress*animProgress : 1-(-2*animProgress+2)**2/2;
+    drawMain(targetStep, eased);
+    if (animProgress < 1) {
+      animFrame = requestAnimationFrame(frame);
+    } else {
+      animProgress = 1;
+      currentStep = targetStep;
+      updateUI();
+    }
+  }
+  animFrame = requestAnimationFrame(frame);
+}
+
+function updateUI() {
+  document.getElementById('badge-step').textContent = currentStep === 0 ? 'Prior' : `Iteration ${currentStep}`;
+  document.getElementById('badge-title').textContent = ITER_NAMES[currentStep];
+  document.getElementById('badge-desc').textContent = ITER_DESCS[currentStep];
+  document.getElementById('annotation').innerHTML = ANNOTATIONS[currentStep];
+  updateIterTrack(currentStep);
+  buildStrips(); // redraw strips
+  drawStrip(currentStep, members[currentStep]); // force redraw active
+}
+
+function jumpTo(step) {
+  if (playing) { clearInterval(playTimer); playing=false; document.getElementById('play-btn').textContent='▶ Play'; }
+  animateTo(step);
+  currentStep = step;
+}
+
+function stepForward() {
+  if (currentStep < members.length-1) animateTo(currentStep+1);
+}
+
+function togglePlay() {
+  if (playing) {
+    clearInterval(playTimer); playing=false;
+    document.getElementById('play-btn').textContent='▶ Play';
+  } else {
+    playing=true;
+    document.getElementById('play-btn').textContent='⏸ Pause';
+    if (currentStep >= members.length-1) { currentStep=0; drawMain(0,1); updateUI(); }
+    const speed = parseInt(document.getElementById('speed').value);
+    const interval = 1100 / speed;
+    playTimer = setInterval(()=>{
+      if(currentStep < members.length-1){
+        animateTo(currentStep+1);
+        currentStep++;
+      } else {
+        clearInterval(playTimer); playing=false;
+        document.getElementById('play-btn').textContent='▶ Play';
+      }
+    }, interval+200);
+  }
+}
+
+function resetAll() {
+  if(playing){ clearInterval(playTimer); playing=false; document.getElementById('play-btn').textContent='▶ Play'; }
+  currentStep=0;
+  generateEnsemble();
+  drawMain(0,1);
+  buildStrips();
+  buildIterTrack();
+  updateUI();
+}
+
+// ════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════
+generateEnsemble();
+buildIterTrack();
+drawMain(0,1);
+buildStrips();
+updateUI();
+
+window.addEventListener('resize', ()=>{
+  drawMain(currentStep,1);
+  buildStrips();
+});
+</script>
+</body>
+</html>

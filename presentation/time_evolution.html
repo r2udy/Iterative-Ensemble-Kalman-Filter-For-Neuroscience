@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylindrical Heat Equation — Bessel Animation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap');
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: #f7f8fc;
+    font-family: 'Inter', sans-serif;
+    color: #1e2130;
+    padding: 24px 28px 36px;
+  }
+
+  h1 {
+    font-size: 17px; font-weight: 600;
+    text-align: center; margin-bottom: 4px;
+  }
+  .subtitle {
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: #7a7f94; margin-bottom: 20px;
+  }
+
+  /* ── layout ── */
+  .layout { display: grid; grid-template-columns: 1fr 280px; gap: 16px; max-width: 1050px; margin: 0 auto; }
+
+  /* ── cards ── */
+  .card {
+    background: #fff; border: 1px solid #e4e8f0;
+    border-radius: 10px; padding: 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+  .card-title {
+    font-size: 11.5px; font-weight: 600; color: #555;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  /* ── controls ── */
+  .ctrl { display: flex; flex-direction: column; gap: 14px; }
+  .ctrl-row { display: flex; flex-direction: column; gap: 5px; }
+  .ctrl-row label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: #7a7f94;
+    display: flex; justify-content: space-between;
+  }
+  .ctrl-row label span {
+    font-family: 'JetBrains Mono', monospace;
+    color: #1e2130; font-weight: 400;
+  }
+  input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 3px;
+    background: #dde2ef; border-radius: 3px; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 13px; height: 13px;
+    border-radius: 50%; background: #2c7bb6;
+    box-shadow: 0 0 0 3px rgba(44,123,182,0.18);
+  }
+
+  /* ── play controls ── */
+  .play-row {
+    display: flex; gap: 8px; margin-top: 4px;
+  }
+  button {
+    flex: 1; padding: 8px 0; border-radius: 6px; border: none;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    letter-spacing: 0.05em; transition: background 0.15s;
+  }
+  .btn-play  { background: #2c7bb6; color: #fff; }
+  .btn-play:hover  { background: #1f5f8e; }
+  .btn-reset { background: #eef2f8; color: #444; }
+  .btn-reset:hover { background: #dde4f0; }
+
+  /* ── time display ── */
+  .time-display {
+    text-align: center; margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px; font-weight: 400; color: #2c7bb6;
+  }
+  .time-display .unit { font-size: 11px; color: #aaa; margin-left: 3px; }
+
+  /* ── metrics ── */
+  .metrics { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .metric {
+    background: #f7f8fc; border-radius: 7px;
+    padding: 9px 12px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .metric .m-lbl { font-size: 10px; color: #888; letter-spacing: 0.05em; }
+  .metric .m-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 600; color: #2c7bb6;
+  }
+
+  /* ── legend ── */
+  .legend { display: flex; gap: 16px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .leg { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #666; }
+  .leg-line { width: 24px; height: 2.5px; border-radius: 2px; }
+  .leg-dash { width: 24px; height: 0; border-top: 2px dashed; }
+
+  .axis path, .axis line { stroke: #dde; }
+  .axis text { fill: #999; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
+
+  #modeChart { margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<h1>Time-dependent cylindrical Poisson — Analytical solution</h1>
+<div class="subtitle">
+  P(r) = P<sub>art</sub> + M/(4D)·(r²−r<sub>art</sub>²) − Mr₀²/(2D)·ln(r/r<sub>art</sub>) &nbsp;·&nbsp;
+  D = 4.03×10³ µm²s⁻¹ &nbsp;·&nbsp; r ∈ [10, 190] µm
+</div>
+
+<div class="layout">
+
+  <!-- Left: main chart -->
+  <div>
+    <div class="legend">
+      <div class="leg"><div class="leg-line" style="background:#2c7bb6"></div> u(r,t) — full solution</div>
+      <div class="leg"><div class="leg-dash" style="border-color:#888"></div> u_ss — steady state</div>
+      <div class="leg"><div class="leg-line" style="background:#e05c2a"></div> perturbation v(r,t)</div>
+    </div>
+    <div class="card" style="padding:14px 10px 10px;">
+      <svg id="mainSvg" width="100%" height="300"></svg>
+    </div>
+    <div class="card" style="margin-top:14px; padding:14px 10px 8px;">
+      <div class="card-title">Mode decay  ‖v(·,t)‖ = Σ Cₙ Zₙ(r) e^{−Dλₙ²t}</div>
+      <svg id="modeSvg" width="100%" height="130"></svg>
+    </div>
+  </div>
+
+  <!-- Right: controls + metrics -->
+  <div style="display:flex; flex-direction:column; gap:14px;">
+
+    <div class="card">
+      <div class="card-title">Parameters</div>
+      <div class="ctrl">
+        <div class="ctrl-row">
+          <label>D — diffusivity (µm²/s) <span id="dVal">4030</span></label>
+          <input type="range" id="dSlider" min="100" max="10000" step="100" value="4030">
+        </div>
+        <div class="ctrl-row">
+          <label>M/α — consumption (mmHg/s) <span id="s0Val">2.23</span></label>
+          <input type="range" id="s0Slider" min="0.1" max="20" step="0.1" value="2.23">
+        </div>
+        <div class="ctrl-row">
+          <label>Perturbation amplitude <span id="ampVal">15</span></label>
+          <input type="range" id="ampSlider" min="0" max="40" step="1" value="15">
+        </div>
+        <div class="ctrl-row">
+          <label>Perturbation position <span id="posVal">50%</span></label>
+          <input type="range" id="posSlider" min="0.1" max="0.9" step="0.05" value="0.5">
+        </div>
+        <div class="ctrl-row">
+          <label>Animation speed <span id="speedVal">1×</span></label>
+          <input type="range" id="speedSlider" min="0.1" max="10" step="0.5" value="1">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Playback</div>
+      <div class="time-display" id="timeDisplay">0<span class="unit">s</span></div>
+      <div class="play-row" style="margin-top:10px;">
+        <button class="btn-play" id="playBtn">▶ Play</button>
+        <button class="btn-reset" id="resetBtn">↺ Reset</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Live metrics</div>
+      <div class="metrics">
+        <div class="metric"><span class="m-lbl">u(r_in)</span><span class="m-val" id="mUin">—</span></div>
+        <div class="metric"><span class="m-lbl">u(r_out)</span><span class="m-val" id="mUout">—</span></div>
+        <div class="metric"><span class="m-lbl">‖v(·,t)‖</span><span class="m-val" id="mNorm">—</span></div>
+        <div class="metric"><span class="m-lbl">τ₁ = 1/(Dλ₁²)</span><span class="m-val" id="mTau">—</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// BESSEL FUNCTIONS  (series expansions, sufficient for our λr range)
+// ══════════════════════════════════════════════════════════════
+function J0(x) {
+  // Abramowitz & Stegun rational approximation, accurate to 1e-5
+  x = Math.abs(x);
+  if (x < 8) {
+    const y = x*x;
+    return (57568490574 + y*(-13362590354 + y*(651619640.7 + y*(-11214424.18 + y*(77392.33017 + y*(-184.9052456))))))
+         / (57568490411 + y*(1029532985 + y*(9494680.718 + y*(59272.64853 + y*(267.8532712 + y)))));
+  } else {
+    const ax = x, z = 8/ax, xx = ax - 0.785398164;
+    const p1 = 1 + z*z*(-0.001098628627 + z*z*(0.000002734510407));
+    const q1 = z*(-0.01562499995 + z*z*(0.0000214307695));
+    return Math.sqrt(0.636619772/ax) * (Math.cos(xx)*p1 - z*Math.sin(xx)*q1);
+  }
+}
+
+function J1(x) {
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x);
+  if (x < 8) {
+    const y = x*x;
+    const num = x*(72362614232 + y*(-7895059235 + y*(242396853.1 + y*(-2972611.439 + y*(15704.48260 + y*(-30.16116660))))));
+    const den = 144725228442 + y*(2300535178 + y*(18583304.74 + y*(99447.43394 + y*(376.9991397 + y))));
+    return sign * num/den;
+  } else {
+    const ax = x, z = 8/ax, xx = ax - 2.356194491;
+    const p1 = 1 + z*z*(0.00183105 + z*z*(-0.000251062));
+    const q1 = z*(0.04687499995 + z*z*(-0.000595376));
+    return sign * Math.sqrt(0.636619772/ax) * (Math.cos(xx)*p1 - z*Math.sin(xx)*q1);
+  }
+}
+
+function Y0(x) {
+  if (x < 8) {
+    const y = x*x;
+    const num = -2957821389 + y*(7062834065 + y*(-512359803.6 + y*(10879881.29 + y*(-86327.92757 + y*228.4622733))));
+    const den =  40076544269 + y*(745249964.8 + y*(7189466.438 + y*(47447.26660 + y*(226.1030244 + y))));
+    return num/den + 0.636619772*J0(x)*Math.log(x);
+  } else {
+    const ax = x, z = 8/ax, xx = ax - 0.785398164;
+    const p1 = 1 + z*z*(-0.001098628627 + z*z*(0.000002734510407));
+    const q1 = z*(-0.01562499995 + z*z*(0.0000214307695));
+    return Math.sqrt(0.636619772/ax) * (Math.sin(xx)*p1 + z*Math.cos(xx)*q1);
+  }
+}
+
+function Y1(x) {
+  if (x < 8) {
+    const y = x*x;
+    const num = x*(-0.4900604943e13 + y*(0.1275274390e13 + y*(-0.5153438139e11 + y*(0.7349264551e9 + y*(-0.4237922726e7 + y*0.8511937935e4)))));
+    const den = 0.2499580570e14 + y*(0.4244419664e12 + y*(0.3733650367e10 + y*(0.2245904002e8 + y*(0.1020426050e6 + y*(0.3549632885e3 + y)))));
+    return num/den + 0.636619772*(J1(x)*Math.log(x) - 1/x);
+  } else {
+    const ax = x, z = 8/ax, xx = ax - 2.356194491;
+    const p1 = 1 + z*z*(0.00183105 + z*z*(-0.000251062));
+    const q1 = z*(0.04687499995 + z*z*(-0.000595376));
+    return Math.sqrt(0.636619772/ax)*(Math.sin(xx)*p1 + z*Math.cos(xx)*q1);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PHYSICS
+// ══════════════════════════════════════════════════════════════
+// Units: r in µm, t in min, u in mmHg, D in µm²/min, S0 in mmHg/min
+// D = 4.03e3 µm²/s  × 60 s/min = 2.418e5 µm²/min
+// S0 = CMRO2 / alpha = 1.80e-12 µmol·µm⁻³·min⁻¹ / 1.39 µmol·µm⁻³·mmHg⁻¹
+//    = 1.295e-12 mmHg/min
+const r_in_m  = 10;     // µm
+const r_out_m = 190;    // µm
+const u_in    = 100.0;  // mmHg
+const NR      = 300;
+const N_MODES = 20;
+
+const r_arr = Array.from({length: NR}, (_, i) => r_in_m + (r_out_m - r_in_m) * i / (NR - 1));
+
+// Steady-state — Krogh cylinder analytical solution
+// P(r) = P_art + M/(4D)*(r² - r_art²) - M*r0²/(2D)*ln(r/r_art)
+// BC1 (Dirichlet): P(r_art) = u_in  ✓ by construction
+// BC2 (Neumann):   dP/dr|_{r0} = 0  ✓ since dP/dr = M/(2D)*r - M*r0²/(2D*r)
+//                                         → at r=r0: M*r0/(2D) - M*r0/(2D) = 0
+function computeSS(D, S0) {
+  const r_art = r_in_m;
+  const r0    = r_out_m;
+  return r => u_in
+    + (S0 / (4*D)) * (r*r - r_art*r_art)
+    - (S0 * r0*r0 / (2*D)) * Math.log(r / r_art);
+}
+
+// Eigenfunction Z_n(r) = Y0(λ r_in) J0(λ r) - J0(λ r_in) Y0(λ r)
+function Zn(r, lam) {
+  return Y0(lam*r_in_m)*J0(lam*r) - J0(lam*r_in_m)*Y0(lam*r);
+}
+
+// Characteristic equation: Y0(λ r_in) J1(λ r_out) - J0(λ r_in) Y1(λ r_out) = 0
+function characteristic(lam) {
+  return Y0(lam*r_in_m)*J1(lam*r_out_m) - J0(lam*r_in_m)*Y1(lam*r_out_m);
+}
+
+function findEigenvalues(n) {
+  const lambdas = [];
+  const lam_min = Math.PI / (r_out_m - r_in_m) * 0.5;
+  const lam_max = lam_min * (n + 2) * 3;
+  const scan = 8000;
+  let prev = characteristic(lam_min);
+  for (let i = 1; i <= scan && lambdas.length < n; i++) {
+    const lam = lam_min + (lam_max - lam_min) * i / scan;
+    const curr = characteristic(lam);
+    if (prev * curr < 0) {
+      // bisection
+      let lo = lam - (lam_max-lam_min)/scan, hi = lam;
+      for (let k = 0; k < 50; k++) {
+        const mid = (lo+hi)/2;
+        if (characteristic(lo)*characteristic(mid) < 0) hi = mid; else lo = mid;
+      }
+      lambdas.push((lo+hi)/2);
+    }
+    prev = curr;
+  }
+  return lambdas;
+}
+
+// Trapz integration
+function trapz(y, x) {
+  let s = 0;
+  for (let i = 0; i < x.length-1; i++) s += 0.5*(y[i]+y[i+1])*(x[i+1]-x[i]);
+  return s;
+}
+
+// Compute Cn coefficients
+function computeCn(lambdas, v0) {
+  return lambdas.map(lam => {
+    const Z   = r_arr.map(r => Zn(r, lam));
+    const num = trapz(r_arr.map((r,i) => v0[i]*Z[i]*r), r_arr);
+    const den = trapz(r_arr.map((r,i) => Z[i]*Z[i]*r), r_arr);
+    return num/den;
+  });
+}
+
+// Full solution at time t
+function uFull(t, uss_arr, lambdas, Cn, D) {
+  return r_arr.map((r, i) => {
+    let v = 0;
+    for (let n = 0; n < lambdas.length; n++) {
+      v += Cn[n] * Zn(r, lambdas[n]) * Math.exp(-D * lambdas[n]**2 * t);
+    }
+    return uss_arr[i] + v;
+  });
+}
+
+// L2 norm of perturbation
+function normV(t, lambdas, Cn, D) {
+  const vt = r_arr.map((r,i) => {
+    let v = 0;
+    for (let n = 0; n < lambdas.length; n++) v += Cn[n]*Zn(r,lambdas[n])*Math.exp(-D*lambdas[n]**2*t);
+    return v;
+  });
+  return Math.sqrt(trapz(r_arr.map((r,i)=>vt[i]*vt[i]*r), r_arr));
+}
+
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
+// Working in µm, mmHg, s
+// D  = 4.03e3 µm²/s
+// M  = CMRO2 / alpha in mmHg/s
+// To get ~10s of mmHg drop: need S0*r0²/(2D) ~ 10 mmHg
+// → S0 ~ 2*D*10 / r0² = 2*4030*10/190² ≈ 2.23 mmHg/s  (visible demo value)
+// Your physical S0 = 2.16e-14 mmHg/s → profile is flat (diffusion dominates)
+let D      = 4.03e3;    // µm²/s
+let S0     = 2.23;      // mmHg/s  (scaled for visibility; physical ≈ 2.16e-14)
+let amp    = 15;
+let posF   = 0.5;
+let speed  = 1;
+let t      = 0;
+let playing = false;
+let rafId  = null;
+let lastTs = null;
+
+let uss_fn, uss_arr, lambdas, Cn_arr;
+
+const T_MAX = 100;  // s
+
+function perturbation(r) {
+  const r_mid = r_in_m + posF*(r_out_m - r_in_m);
+  const width = (r_out_m - r_in_m) / 6;
+  return amp * Math.exp(-((r - r_mid)**2) / (2*width**2));
+}
+
+function recompute() {
+  uss_fn  = computeSS(D, S0);
+  uss_arr = r_arr.map(r => uss_fn(r));
+  lambdas = findEigenvalues(N_MODES);
+  const v0 = r_arr.map(r => perturbation(r));
+  Cn_arr  = computeCn(lambdas, v0);
+  document.getElementById('mTau').textContent =
+    lambdas.length ? (1/(D*lambdas[0]**2)).toFixed(0)+' s' : '—';
+}
+
+// ══════════════════════════════════════════════════════════════
+// D3 CHARTS
+// ══════════════════════════════════════════════════════════════
+const M = {top:8, right:16, bottom:28, left:44};
+
+function getW(svgEl) {
+  return (svgEl.getBoundingClientRect().width || 680) - M.left - M.right;
+}
+
+// Main chart
+const svgMain = d3.select('#mainSvg');
+let gMain, xSm, ySm, Wm, Hm;
+const lineAna  = d3.line();
+const lineSS   = d3.line();
+const linePerturb = d3.line();
+let pathAna, pathSS, pathPerturb;
+let xAxisGm, yAxisGm;
+
+function initMain() {
+  svgMain.selectAll('*').remove();
+  Wm = getW(svgMain.node());
+  Hm = 300 - M.top - M.bottom;
+  gMain = svgMain.append('g').attr('transform',`translate(${M.left},${M.top})`);
+
+  xSm = d3.scaleLinear([r_in_m*1e6, r_out_m*1e6], [0, Wm]);
+  ySm = d3.scaleLinear([0, 0], [Hm, 0]); // domain set later
+
+  xAxisGm = gMain.append('g').attr('class','axis').attr('transform',`translate(0,${Hm})`);
+  yAxisGm = gMain.append('g').attr('class','axis');
+
+  gMain.append('text').attr('x', Wm/2).attr('y', Hm+22)
+    .attr('text-anchor','middle').attr('fill','#bbb').attr('font-size',9).text('r  (µm)');
+  gMain.append('text').attr('transform','rotate(-90)').attr('x',-Hm/2).attr('y',-34)
+    .attr('text-anchor','middle').attr('fill','#bbb').attr('font-size',9).text('u  (pO₂)');
+
+  // BC markers
+  gMain.append('line').attr('class','bc-in')
+    .attr('x1',xSm(r_in_m*1e6)).attr('x2',xSm(r_in_m*1e6))
+    .attr('y1',0).attr('y2',Hm).attr('stroke','#e05c2a').attr('stroke-width',1).attr('stroke-dasharray','3,2').attr('opacity',0.5);
+  gMain.append('line').attr('class','bc-out')
+    .attr('x1',xSm(r_out_m*1e6)).attr('x2',xSm(r_out_m*1e6))
+    .attr('y1',0).attr('y2',Hm).attr('stroke','#3aabaa').attr('stroke-width',1).attr('stroke-dasharray','3,2').attr('opacity',0.5);
+
+  pathSS      = gMain.append('path').attr('fill','none').attr('stroke','#aaa').attr('stroke-width',1.5).attr('stroke-dasharray','5,3');
+  pathPerturb = gMain.append('path').attr('fill','none').attr('stroke','#e05c2a').attr('stroke-width',1.5).attr('opacity',0.7);
+  pathAna     = gMain.append('path').attr('fill','none').attr('stroke','#2c7bb6').attr('stroke-width',2.4);
+
+  lineAna.x(d => xSm(d[0])).y(d => ySm(d[1]));
+  lineSS.x(d => xSm(d[0])).y(d => ySm(d[1]));
+  linePerturb.x(d => xSm(d[0])).y(d => ySm(d[1]));
+}
+
+function updateMain() {
+  const u_t   = uFull(t, uss_arr, lambdas, Cn_arr, D);
+  const v_t   = u_t.map((u,i) => u - uss_arr[i]);
+  const r_um  = r_arr.map(r => r*1e6);
+
+  const allY  = [...u_t, ...uss_arr];
+  const yMin  = Math.min(...allY) - 2;
+  const yMax  = Math.max(...allY) + 2;
+  ySm.domain([yMin, yMax]);
+
+  xAxisGm.call(d3.axisBottom(xSm).ticks(6));
+  yAxisGm.call(d3.axisLeft(ySm).ticks(5));
+
+  pathAna.attr('d',     lineAna(r_um.map((r,i) => [r, u_t[i]])));
+  pathSS.attr('d',      lineSS(r_um.map((r,i)  => [r, uss_arr[i]])));
+  pathPerturb.attr('d', linePerturb(r_um.map((r,i) => [r, uss_arr[i] + v_t[i]])));
+
+  // metrics
+  document.getElementById('mUin').textContent  = u_t[0].toFixed(2);
+  document.getElementById('mUout').textContent = u_t[u_t.length-1].toFixed(2);
+  const nv = normV(t, lambdas, Cn_arr, D);
+  document.getElementById('mNorm').textContent = nv.toFixed(4);
+}
+
+// Mode decay chart
+const svgMode = d3.select('#modeSvg');
+let gMode, xSd, ySd, Wd, Hd;
+let pathDecay, tMarker;
+const normHistory = [];
+
+function initMode() {
+  svgMode.selectAll('*').remove();
+  Wd = getW(svgMode.node());
+  Hd = 130 - M.top - M.bottom;
+  gMode = svgMode.append('g').attr('transform',`translate(${M.left},${M.top})`);
+
+  xSd = d3.scaleLinear([0, T_MAX], [0, Wd]);
+  ySd = d3.scaleLog().domain([0.01, 200]).range([Hd, 0]).clamp(true);
+
+  gMode.append('g').attr('class','axis').attr('transform',`translate(0,${Hd})`)
+    .call(d3.axisBottom(xSd).ticks(5).tickFormat(d => d >= 1000 ? `${d/1000}k` : d));
+  gMode.append('g').attr('class','axis')
+    .call(d3.axisLeft(ySd).ticks(3).tickFormat(d3.format('.1f')));
+
+  gMode.append('text').attr('x', Wd/2).attr('y', Hd+22)
+    .attr('text-anchor','middle').attr('fill','#bbb').attr('font-size',9).text('t  (s)');
+  gMode.append('text').attr('transform','rotate(-90)').attr('x',-Hd/2).attr('y',-34)
+    .attr('text-anchor','middle').attr('fill','#bbb').attr('font-size',9).text('‖v‖');
+
+  // τ₁ line
+  if (lambdas.length) {
+    const tau1 = 1/(D*lambdas[0]**2);
+    if (tau1 < T_MAX) {
+      gMode.append('line')
+        .attr('x1',xSd(tau1)).attr('x2',xSd(tau1))
+        .attr('y1',0).attr('y2',Hd)
+        .attr('stroke','#e05c2a').attr('stroke-width',1).attr('stroke-dasharray','3,2').attr('opacity',0.6);
+      gMode.append('text').attr('x',xSd(tau1)+3).attr('y',10)
+        .attr('fill','#e05c2a').attr('font-size',8).text('τ₁');
+    }
+  }
+
+  pathDecay = gMode.append('path').attr('fill','none').attr('stroke','#8e6bbf').attr('stroke-width',2);
+  tMarker   = gMode.append('circle').attr('r',5).attr('fill','#2c7bb6').attr('stroke','white').attr('stroke-width',1.5);
+}
+
+function updateMode() {
+  normHistory.push([t, normV(t, lambdas, Cn_arr, D)]);
+  // cap history
+  while (normHistory.length > 600) normHistory.shift();
+
+  const line = d3.line().x(d=>xSd(d[0])).y(d=>ySd(Math.max(d[1],0.01)));
+  pathDecay.attr('d', line(normHistory));
+
+  const last = normHistory[normHistory.length-1];
+  tMarker.attr('cx', xSd(last[0])).attr('cy', ySd(Math.max(last[1],0.01)));
+}
+
+// ══════════════════════════════════════════════════════════════
+// ANIMATION LOOP
+// ══════════════════════════════════════════════════════════════
+function tick(ts) {
+  if (!lastTs) lastTs = ts;
+  const elapsed = (ts - lastTs) / 1000;  // seconds of real time
+  lastTs = ts;
+
+  t += elapsed * speed * 1;  // sim-seconds
+  t = Math.min(t, T_MAX);
+
+  document.getElementById('timeDisplay').innerHTML =
+    `${t.toFixed(2)}<span class="unit">s</span>`;
+
+  updateMain();
+  updateMode();
+
+  if (t < T_MAX && playing) rafId = requestAnimationFrame(tick);
+  else if (t >= T_MAX) { playing = false; document.getElementById('playBtn').textContent = '▶ Play'; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CONTROLS
+// ══════════════════════════════════════════════════════════════
+function sl(id, dispId, fmt, cb) {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    document.getElementById(dispId).textContent = fmt(+el.value);
+    cb(+el.value);
+    recompute();
+    normHistory.length = 0;
+    initMode();
+    updateMain();
+    updateMode();
+  });
+}
+
+sl('dSlider',  'dVal',  v => Math.round(v), v => D  = v);
+sl('s0Slider', 's0Val', v => v.toFixed(2),  v => S0 = v);
+sl('ampSlider',   'ampVal', v => Math.round(v),         v => amp = v);
+sl('posSlider',   'posVal', v => Math.round(v*100)+'%', v => posF = v);
+sl('speedSlider', 'speedVal', v => v.toFixed(1)+'×',    v => speed = v);
+
+document.getElementById('playBtn').addEventListener('click', () => {
+  playing = !playing;
+  document.getElementById('playBtn').textContent = playing ? '⏸ Pause' : '▶ Play';
+  if (playing) { lastTs = null; rafId = requestAnimationFrame(tick); }
+  else cancelAnimationFrame(rafId);
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  playing = false;
+  cancelAnimationFrame(rafId);
+  document.getElementById('playBtn').textContent = '▶ Play';
+  t = 0; lastTs = null;
+  normHistory.length = 0;
+  initMode();
+  updateMain();
+  updateMode();
+  document.getElementById('timeDisplay').innerHTML = `0<span class="unit">s</span>`;
+});
+
+// ══════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════
+recompute();
+initMain();
+initMode();
+updateMain();
+updateMode();
+window.addEventListener('resize', () => { initMain(); initMode(); updateMain(); updateMode(); });
+</script>
+</body>
+</html>

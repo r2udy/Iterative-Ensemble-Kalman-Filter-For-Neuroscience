@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Assimilation — pO₂ Maps</title>
+<link href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;1,300&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: #f0f4f8;
+    font-family: 'Lato', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 32px;
+  }
+  .diagram-wrap {
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.10);
+    padding: 48px 40px 40px;
+    width: 100%;
+    max-width: 960px;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+</style>
+</head>
+<body>
+<div class="diagram-wrap">
+<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg" font-family="Lato, sans-serif">
+
+  <!-- ── BACKGROUND TINT ZONES ── -->
+  <!-- subtle column guides, invisible -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       LEFT BLOB — Control space (model params / states)
+  ════════════════════════════════════════════════════════════ -->
+
+  <!-- Dashed control-space ellipse -->
+  <ellipse cx="130" cy="230" rx="75" ry="105"
+           fill="none" stroke="#555" stroke-width="1.6"
+           stroke-dasharray="7,5" opacity="0.6"/>
+
+  <!-- Dots inside — ensemble members -->
+  <circle cx="118" cy="200" r="6" fill="#4a90c4" opacity="0.9"/>
+  <circle cx="145" cy="215" r="5" fill="#4a90c4" opacity="0.7"/>
+  <circle cx="108" cy="228" r="4.5" fill="#4a90c4" opacity="0.6"/>
+  <circle cx="138" cy="244" r="5" fill="#9b59b6" opacity="0.9"/>
+  <circle cx="115" cy="258" r="4" fill="#9b59b6" opacity="0.7"/>
+  <circle cx="148" cy="265" r="5.5" fill="#9b59b6" opacity="0.6"/>
+
+  <!-- Control space label -->
+  <text x="130" y="355" text-anchor="middle" font-size="11" fill="#444" font-style="italic">Control space:</text>
+  <text x="130" y="370" text-anchor="middle" font-size="11" fill="#444" font-style="italic">model parameters</text>
+  <text x="130" y="385" text-anchor="middle" font-size="11" fill="#444" font-style="italic">/ model states</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       TOP LABEL — The background
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="60" y="28" width="170" height="30" rx="5"
+        fill="none" stroke="#4a90c4" stroke-width="1.8"/>
+  <text x="145" y="48" text-anchor="middle" font-size="13" fill="#4a90c4" font-weight="700">The background</text>
+
+  <!-- Curved arrow: background label → assimilation core -->
+  <path d="M 232 43 C 340 20, 390 60, 420 120"
+        fill="none" stroke="#4a90c4" stroke-width="1.5" stroke-dasharray="5,3"
+        marker-end="url(#arrowBlue)"/>
+
+  <!-- ══════════════════════════════════════════════════════════
+       CENTRE — Assimilation core ellipse
+  ════════════════════════════════════════════════════════════ -->
+  <ellipse cx="450" cy="175" rx="115" ry="75" fill="#1a3a5c"/>
+
+  <text x="450" y="152" text-anchor="middle" font-size="12.5" fill="white" font-weight="400">Iterative assimilation</text>
+  <text x="450" y="169" text-anchor="middle" font-size="12.5" fill="white" font-weight="400">of pO₂ maps to</text>
+  <text x="450" y="186" text-anchor="middle" font-size="12.5" fill="white" font-weight="400">"correct" the</text>
+  <text x="450" y="203" text-anchor="middle" font-size="12.5" fill="white" font-weight="400">background</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       TOP RIGHT — The observation label
+  ════════════════════════════════════════════════════════════ -->
+  <rect x="660" y="28" width="190" height="30" rx="5"
+        fill="none" stroke="#e6a817" stroke-width="1.8"/>
+  <text x="755" y="48" text-anchor="middle" font-size="13" fill="#e6a817" font-weight="700">The observation</text>
+
+  <!-- Curved arrow: obs label → assimilation core -->
+  <path d="M 668 43 C 600 20, 560 60, 530 120"
+        fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="5,3"
+        marker-end="url(#arrowOrange)"/>
+
+  <!-- ══════════════════════════════════════════════════════════
+       RIGHT BLOB — Observation space (pO2 map)
+  ════════════════════════════════════════════════════════════ -->
+
+  <!-- Dashed obs ellipse -->
+  <ellipse cx="775" cy="230" rx="82" ry="105"
+           fill="none" stroke="#e6a817" stroke-width="1.6"
+           stroke-dasharray="7,5" opacity="0.75"/>
+
+  <!-- pO2 map — small colour grid inside -->
+  <!-- Grid of coloured squares simulating a false-colour pO2 map -->
+  <g transform="translate(726, 172)">
+    <!-- Row 1 -->
+    <rect x="0"  y="0"  width="16" height="16" rx="1" fill="#d73027" opacity="0.85"/>
+    <rect x="18" y="0"  width="16" height="16" rx="1" fill="#f46d43" opacity="0.85"/>
+    <rect x="36" y="0"  width="16" height="16" rx="1" fill="#fdae61" opacity="0.85"/>
+    <rect x="54" y="0"  width="16" height="16" rx="1" fill="#fee08b" opacity="0.85"/>
+    <!-- Row 2 -->
+    <rect x="0"  y="18" width="16" height="16" rx="1" fill="#f46d43" opacity="0.85"/>
+    <rect x="18" y="18" width="16" height="16" rx="1" fill="#abdda4" opacity="0.85"/>
+    <rect x="36" y="18" width="16" height="16" rx="1" fill="#66c2a5" opacity="0.85"/>
+    <rect x="54" y="18" width="16" height="16" rx="1" fill="#4393c3" opacity="0.85"/>
+    <!-- Row 3 -->
+    <rect x="0"  y="36" width="16" height="16" rx="1" fill="#fee08b" opacity="0.85"/>
+    <rect x="18" y="36" width="16" height="16" rx="1" fill="#66c2a5" opacity="0.85"/>
+    <rect x="36" y="36" width="16" height="16" rx="1" fill="#3288bd" opacity="0.85"/>
+    <rect x="54" y="36" width="16" height="16" rx="1" fill="#5e4fa2" opacity="0.85"/>
+    <!-- Row 4 -->
+    <rect x="0"  y="54" width="16" height="16" rx="1" fill="#abdda4" opacity="0.85"/>
+    <rect x="18" y="54" width="16" height="16" rx="1" fill="#4393c3" opacity="0.85"/>
+    <rect x="36" y="54" width="16" height="16" rx="1" fill="#5e4fa2" opacity="0.85"/>
+    <rect x="54" y="54" width="16" height="16" rx="1" fill="#313695" opacity="0.85"/>
+  </g>
+
+  <!-- pO2 label inside -->
+  <text x="775" y="264" text-anchor="middle" font-size="13" fill="#e6a817" font-weight="700"
+        font-style="italic">pO₂  map</text>
+
+  <!-- Observation space label -->
+  <text x="775" y="355" text-anchor="middle" font-size="11" fill="#888" font-style="italic">Observation space</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ITERATION LOOP — the key addition
+  ════════════════════════════════════════════════════════════ -->
+
+  <!-- Loop arrow arcing from Analysis back up to the core — iterative cycle -->
+  <!-- Down arrow from core to analysis -->
+  <path d="M 450 252 L 450 305"
+        fill="none" stroke="#555" stroke-width="1.6"
+        marker-end="url(#arrowGrey)"/>
+
+  <!-- Analysis box -->
+  <rect x="360" y="305" width="180" height="36" rx="6"
+        fill="none" stroke="#c0392b" stroke-width="2"/>
+  <text x="450" y="328" text-anchor="middle" font-size="13.5" fill="#c0392b" font-weight="700">The analysis  x^a</text>
+
+  <!-- Iteration loop: arc from analysis box back to core left side -->
+  <!-- Label on the loop -->
+  <path d="M 360 323 C 240 323, 220 175, 332 175"
+        fill="none" stroke="#c0392b" stroke-width="1.5"
+        stroke-dasharray="6,4"
+        marker-end="url(#arrowRed)"/>
+
+  <!-- Iteration label along the loop -->
+  <text x="248" y="295" text-anchor="middle" font-size="11" fill="#c0392b" font-style="italic">iterate</text>
+  <text x="248" y="310" text-anchor="middle" font-size="11" fill="#c0392b" font-style="italic">n times</text>
+
+  <!-- small loop icon -->
+  <path d="M 234 275 C 215 268, 210 255, 220 248 C 228 242, 238 246, 236 254"
+        fill="none" stroke="#c0392b" stroke-width="1.3"
+        marker-end="url(#arrowRedSm)"/>
+
+  <!-- ══════════════════════════════════════════════════════════
+       BOTTOM CAPTION
+  ════════════════════════════════════════════════════════════ -->
+  <line x1="80" y1="418" x2="820" y2="418" stroke="#ddd" stroke-width="1"/>
+  <text x="450" y="440" text-anchor="middle" font-size="11.5" fill="#555">
+    A corrected background using information from
+    <tspan fill="#4a90c4" font-weight="700"> pO₂ observation maps</tspan>,
+    refined over
+    <tspan fill="#c0392b" font-weight="700"> multiple iterations</tspan>
+  </text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       LEFT ARROWS — control space → core
+  ════════════════════════════════════════════════════════════ -->
+  <!-- curved arrow from control ellipse to core -->
+  <path d="M 200 215 C 270 190, 310 175, 332 175"
+        fill="none" stroke="#4a90c4" stroke-width="1.5"
+        marker-end="url(#arrowBlue)"/>
+  <path d="M 200 245 C 270 240, 310 215, 340 205"
+        fill="none" stroke="#9b59b6" stroke-width="1.5"
+        marker-end="url(#arrowPurple)"/>
+
+  <!-- RIGHT ARROWS — obs → core -->
+  <path d="M 692 210 C 640 195, 590 180, 568 175"
+        fill="none" stroke="#e6a817" stroke-width="1.5"
+        marker-end="url(#arrowOrange)"/>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ARROWHEAD MARKERS
+  ════════════════════════════════════════════════════════════ -->
+  <defs>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#4a90c4" stroke-width="1.3"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#e6a817" stroke-width="1.3"/>
+    </marker>
+    <marker id="arrowGrey" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#555" stroke-width="1.3"/>
+    </marker>
+    <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#c0392b" stroke-width="1.3"/>
+    </marker>
+    <marker id="arrowRedSm" markerWidth="7" markerHeight="7" refX="5" refY="2.5" orient="auto">
+      <path d="M0,0 L5,2.5 L0,5" fill="none" stroke="#c0392b" stroke-width="1.2"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6" fill="none" stroke="#9b59b6" stroke-width="1.3"/>
+    </marker>
+  </defs>
+
+  <!-- ══════════════════════════════════════════════════════════
+       COVARIANCE LABELS — B and R
+  ════════════════════════════════════════════════════════════ -->
+  <!-- B label on control space arrow -->
+  <rect x="218" y="178" width="46" height="20" rx="4" fill="#eaf3fb" stroke="#4a90c4" stroke-width="1"/>
+  <text x="241" y="192" text-anchor="middle" font-size="11" fill="#4a90c4" font-weight="700">B  (prior)</text>
+
+  <!-- R label on obs arrow -->
+  <rect x="636" y="178" width="48" height="20" rx="4" fill="#fef9ec" stroke="#e6a817" stroke-width="1"/>
+  <text x="660" y="192" text-anchor="middle" font-size="11" fill="#e6a817" font-weight="700">R  (obs)</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       COLOUR BAR — pO2 scale hint
+  ════════════════════════════════════════════════════════════ -->
+  <defs>
+    <linearGradient id="po2bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#313695"/>
+      <stop offset="25%"  stop-color="#4393c3"/>
+      <stop offset="50%"  stop-color="#abdda4"/>
+      <stop offset="75%"  stop-color="#fdae61"/>
+      <stop offset="100%" stop-color="#d73027"/>
+    </linearGradient>
+  </defs>
+  <rect x="716" y="280" width="120" height="8" rx="2" fill="url(#po2bar)"/>
+  <text x="716" y="298" text-anchor="start" font-size="8.5" fill="#999">low</text>
+  <text x="836" y="298" text-anchor="end"   font-size="8.5" fill="#999">high  pO₂</text>
+
+</svg>
+</div>
+</body>
+</html>

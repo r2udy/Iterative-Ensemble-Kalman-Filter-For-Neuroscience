@@ -1073,3 +1073,32 @@ plt.title("CMRO₂ vs Cortical Depth")
 plt.grid(axis="y", linestyle="--", alpha=0.4)
 plt.tight_layout()
 plt.show()
+
+################################
+
+# -----------------------
+# Uncertainty associated to estimation
+# -----------------------
+# Create figure
+plt.figure(figsize=(10, 6))
+cmro2_mean_ = stats_overall[0, :, -1]
+cmro2_cov_ = stats_overall[1, :, -1]
+# Plot mean +/- 1 standard deviation (sqrt of variance)
+plt.plot(x_obs, cmro2_mean_, '-o', color='green', label='State EnKF estimate (CMRO2)')
+plt.fill_between(
+    x_obs,
+    cmro2_mean_ - np.sqrt(cmro2_cov_),  # Lower bound (mean - σ)
+    cmro2_mean_ + np.sqrt(cmro2_cov_),  # Upper bound (mean + σ)
+    color='blue',
+    alpha=0.2,
+    label='Uncertainty (+/- 1 StD)'
+)
+plt.xlabel('$PO_{2}$ Map ID')
+plt.ylabel('CMRO2 (umol /cm^3 /min)')
+plt.title('EnKF CMRO2 Estimation with Uncertainty')
+plt.xticks(x_obs, [f'Obs{i}' for i in x_obs])
+plt.axhline(y=np.mean(cmro2_mean_), color='r', linestyle='--', label='Mean CMRO2')
+plt.legend()
+plt.grid(True)
+plt.savefig(path + 'enkf_cmro2_estimation_and_uncertainty.png', dpi=300, bbox_inches='tight')
+plt.show()

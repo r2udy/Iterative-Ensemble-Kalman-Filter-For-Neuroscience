@@ -1,0 +1,566 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Signed-bias explorer  —  loads existing .npy arrays, no recomputation.
+=======================================================================
+Reads the output of sensitivity_analysis_v2 and produces:
+
+  Per OAT sweep (6 sweeps × 5 figures):
+    signed_bias_convergence.png  — true vs estimated CMRO2 + signed residual
+    signed_bias_final.png        — signed bar chart at final iteration
+    signed_bias_heatmap.png      — sweep × iteration heatmap (diverging)
+    true_vs_est_scatter.png      — scatter true vs estimated with ±σ bands
+    residual_distribution.png    — histogram of signed residuals at final iter
+
+  Cross-sweep (4 pairs × 1 figure):
+    signed_bias_cross.png        — diverging heatmap of signed bias grid
+
+  Summary:
+    SUMMARY_signed_bias.png      — 2×3 final-iteration signed bars, all sweeps
+
+Usage
+-----
+  python signed_bias_explorer.py
+
+  Optional: set SAVE_PATH below to match your sensitivity_analysis_v2 output folder.
+"""
+
+import os, sys
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
+from matplotlib.gridspec import GridSpec
+import warnings
+warnings.filterwarnings("ignore")
+
+# ══════════════════════════════════════════════════════
+# CONFIG  —  edit SAVE_PATH to match your output folder
+# ══════════════════════════════════════════════════════
+ROOT      = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/"
+SAVE_PATH = os.path.join(ROOT, "Data/EnKF_plots/sensitivity_analysis_v2/")
+OUT_PATH  = os.path.join(SAVE_PATH, "signed_bias_analysis/")
+os.makedirs(OUT_PATH, exist_ok=True)
+
+# Physical constant (needed to reconstruct true values for cmro2_true sweep)
+D         = 4.0e3
+ALPHA     = 1.39e-15
+C2M       = 60 * D * ALPHA * 1e12
+
+OAT_SWEEPS = ["cmro2_true", "R0_true", "obs_var", "cmro2_var", "R0_var", "pvessel_var"]
+
+SWEEP_META = {
+    "cmro2_true"  : ("CMRO2 true [µmol/cm³/min]",   lambda v: f"{v:.2f}"),
+    "R0_true"     : ("R0 true [µm]",                 lambda v: f"{v:.0f}"),
+    "obs_var"     : ("Obs noise σ [mmHg]",            lambda v: f"{np.sqrt(v):.0f}"),
+    "cmro2_var"   : ("CMRO2 prior σ",                 lambda v: f"{np.sqrt(v):.3g}"),
+    "R0_var"      : ("R0 prior σ [µm]",              lambda v: f"{np.sqrt(v):.1f}"),
+    "pvessel_var" : ("pvessel prior σ [mmHg]",        lambda v: f"{np.sqrt(v):.1f}"),
+}
+
+CROSS_PAIRS = [
+    ("cmro2_true", "obs_var",   "CMRO2_true x obs_var"),
+    ("cmro2_true", "cmro2_var", "CMRO2_true x cmro2_var"),
+    ("R0_true",    "obs_var",   "R0_true x obs_var"),
+    ("obs_var",    "cmro2_var", "obs_var x cmro2_var"),
+]
+
+# Default true values (used as reference line when not the swept parameter)
+DEF_CMRO2 = 2.0
+
+# ══════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════
+
+def load_oat(sweep_name):
+    """Load all .npy arrays for one OAT sweep. Returns dict + sweep_values."""
+    sub  = os.path.join(SAVE_PATH, "oat", sweep_name)
+    if not os.path.isdir(sub):
+        print(f"  [WARN] folder not found: {sub}")
+        return None, None
+    arrays = {}
+    for f in os.listdir(sub):
+        if f.endswith(".npy"):
+            key = f.replace(".npy", "")
+            arrays[key] = np.load(os.path.join(sub, f))
+    if "sweep_values" not in arrays:
+        print(f"  [WARN] sweep_values.npy missing in {sub}")
+        return None, None
+    svals = arrays.pop("sweep_values")
+    return arrays, svals
+
+
+def load_cross(pA, pB):
+    """Load grid arrays for one cross-sweep pair."""
+    tag = f"{pA}_x_{pB}"
+    sub = os.path.join(SAVE_PATH, "cross", tag)
+    if not os.path.isdir(sub):
+        print(f"  [WARN] folder not found: {sub}")
+        return None
+    out = {}
+    for f in os.listdir(sub):
+        if f.endswith(".npy"):
+            out[f.replace(".npy","")] = np.load(os.path.join(sub, f))
+    return out
+
+
+def _colors(n, cmap="plasma"):
+    return plt.cm.get_cmap(cmap)(np.linspace(0.12, 0.92, n))
+
+
+def _signed(arrays, svals, cmro2_true_override=None):
+    """
+    Compute signed bias = true_cmro2 - cmro2_mean per sweep value per iteration.
+    For the cmro2_true sweep the true value varies per row.
+    For all other sweeps the true value is fixed at DEF_CMRO2.
+    Returns array shaped (n_sweep_values, ITER_MAX).
+    """
+    cmro2_mean = arrays["cmro2_mean"]           # (n, ITER_MAX)
+    n          = cmro2_mean.shape[0]
+    true_vals  = (svals if cmro2_true_override == "cmro2_true"
+                  else np.full(n, DEF_CMRO2))
+    return true_vals[:, None] - cmro2_mean       # broadcast: (n,1) - (n, ITER_MAX)
+
+
+def _diverging_norm(data):
+    vmax = np.abs(data).max() + 1e-9
+    return TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+
+# ══════════════════════════════════════════════════════
+# PER-SWEEP FIGURES
+# ══════════════════════════════════════════════════════
+
+def fig_convergence(sweep_name, svals, arrays, signed):
+    """
+    3-row panel:
+      Row 1 — true CMRO2 (dashed) vs estimated CMRO2 mean ± σ for each sweep value
+      Row 2 — signed bias = true − est  (zero line in black)
+      Row 3 — posterior σ (uncertainty width)
+    """
+    meta   = SWEEP_META[sweep_name]
+    colors = _colors(len(svals))
+    iters  = np.arange(1, signed.shape[1] + 1)
+    ITER_MAX = signed.shape[1]
+
+    fig, axes = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
+
+    # Row 1: true vs estimated
+    ax = axes[0]
+    for idx, val in enumerate(svals):
+        c   = colors[idx]
+        lbl = meta[1](val)
+        mu  = arrays["cmro2_mean"][idx]
+        sig = arrays["cmro2_std"][idx]
+        true_v = val if sweep_name == "cmro2_true" else DEF_CMRO2
+        ax.axhline(true_v, color=c, ls="--", lw=1.2, alpha=0.6)
+        ax.plot(iters, mu, color=c, lw=2, label=lbl)
+        ax.fill_between(iters, mu - sig, mu + sig, color=c, alpha=0.12)
+    ax.set_ylabel("CMRO2  [µmol/cm³/min]", fontsize=9)
+    ax.set_title("Estimated CMRO2 (solid ± σ band)  vs  True CMRO2 (dashed)", fontsize=9)
+    ax.legend(fontsize=7, ncol=3, loc="upper right")
+    ax.grid(True, alpha=0.2)
+
+    # Row 2: signed bias
+    ax = axes[1]
+    for idx, val in enumerate(svals):
+        ax.plot(iters, signed[idx], color=colors[idx], lw=2,
+                marker="o", ms=2.5, label=meta[1](val))
+    ax.axhline(0, color="k", lw=1.5, ls="--", zorder=5)
+    ax.fill_between(iters,
+                    np.min(signed, axis=0),
+                    np.max(signed, axis=0),
+                    alpha=0.07, color="grey")
+    ax.axvspan(ITER_MAX - 0.5, ITER_MAX + 0.5, color="gold", alpha=0.15)
+    ax.set_ylabel("Signed bias  (true − est)\n[µmol/cm³/min]", fontsize=9)
+    ax.set_title("+  →  underestimate     −  →  overestimate", fontsize=9)
+    ax.legend(fontsize=7, ncol=3, loc="upper right")
+    ax.grid(True, alpha=0.2)
+
+    # Row 3: posterior σ
+    ax = axes[2]
+    for idx, val in enumerate(svals):
+        ax.plot(iters, arrays["cmro2_std"][idx], color=colors[idx], lw=2,
+                label=meta[1](val))
+    ax.set_ylabel("Posterior σ  [µmol/cm³/min]", fontsize=9)
+    ax.set_title("Uncertainty width (should shrink but not collapse to 0)", fontsize=9)
+    ax.legend(fontsize=7, ncol=3, loc="upper right")
+    ax.grid(True, alpha=0.2)
+
+    axes[-1].set_xlabel("Iteration", fontsize=10)
+    fig.suptitle(f"True vs Estimated CMRO2  —  sweep: {sweep_name}  ({meta[0]})",
+                 fontweight="bold", fontsize=12)
+    plt.tight_layout()
+    return fig
+
+
+def fig_final_signed_bar(sweep_name, svals, arrays, signed):
+    """
+    Horizontal bar chart of signed bias at final iteration.
+    Orange = underestimate (true > est), blue = overestimate (true < est).
+    Also shows true value, estimated value, and posterior σ as annotations.
+    """
+    meta   = SWEEP_META[sweep_name]
+    finals = signed[:, -1]
+    est_f  = arrays["cmro2_mean"][:, -1]
+    std_f  = arrays["cmro2_std"][:, -1]
+    true_f = svals if sweep_name == "cmro2_true" else np.full(len(svals), DEF_CMRO2)
+    x      = np.arange(len(svals))
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, max(4, len(svals) * 0.65 + 2)))
+
+    # Left: signed bias bar
+    ax = axes[0]
+    bar_clrs = ["#D85A30" if v > 0 else "#378ADD" for v in finals]
+    bars = ax.barh(x, finals, color=bar_clrs, edgecolor="k", linewidth=0.6, alpha=0.85)
+    ax.axvline(0, color="k", lw=1.5, ls="--")
+    for bar, val, e, s in zip(bars, finals, est_f, std_f):
+        w    = bar.get_width()
+        side = 1 if w >= 0 else -1
+        ax.text(w + side * 0.003,
+                bar.get_y() + bar.get_height() / 2,
+                f"{val:+.3f}",
+                va="center", ha="left" if side == 1 else "right",
+                fontsize=8)
+    ax.set_yticks(x)
+    ax.set_yticklabels([meta[1](v) for v in svals], fontsize=9)
+    ax.set_xlabel("Signed bias (true − est)  [µmol/cm³/min]", fontsize=9)
+    ax.set_ylabel(meta[0], fontsize=9)
+    ax.set_title("Signed bias at final iteration\n"
+                 "orange = underestimate  |  blue = overestimate", fontsize=9)
+    ax.grid(True, axis="x", alpha=0.25)
+
+    # Right: true vs estimated with error bars (posterior σ)
+    ax2 = axes[1]
+    ax2.errorbar(est_f, x, xerr=std_f, fmt="o", color="#1D9E75",
+                 ecolor="#1D9E75", elinewidth=1.5, capsize=4,
+                 label="Estimated ± posterior σ", zorder=3)
+    ax2.scatter(true_f, x, marker="|", s=200, color="k",
+                linewidths=2, label="True value", zorder=4)
+    ax2.set_yticks(x)
+    ax2.set_yticklabels([meta[1](v) for v in svals], fontsize=9)
+    ax2.set_xlabel("CMRO2  [µmol/cm³/min]", fontsize=9)
+    ax2.set_title("True (|) vs Estimated (● ± σ) at final iteration", fontsize=9)
+    ax2.legend(fontsize=8)
+    ax2.grid(True, axis="x", alpha=0.25)
+
+    fig.suptitle(f"Final-iteration signed bias  —  sweep: {sweep_name}",
+                 fontweight="bold", fontsize=12)
+    plt.tight_layout()
+    return fig
+
+
+def fig_signed_heatmap(sweep_name, svals, signed):
+    """
+    Heatmap of signed bias: sweep value × iteration.
+    Diverging colormap centred at zero.
+    """
+    meta  = SWEEP_META[sweep_name]
+    ITER_MAX = signed.shape[1]
+    norm  = _diverging_norm(signed)
+
+    fig, ax = plt.subplots(figsize=(11, max(4, len(svals) * 0.75 + 2)))
+    im = ax.imshow(signed, cmap="RdBu", norm=norm, aspect="auto",
+                   extent=[1, ITER_MAX, len(svals) - 0.5, -0.5])
+    ax.set_xlabel("Iteration", fontsize=10)
+    ax.set_ylabel(meta[0], fontsize=9)
+    ax.set_yticks(range(len(svals)))
+    ax.set_yticklabels([meta[1](v) for v in svals], fontsize=8)
+    ax.set_title(f"Signed bias heatmap  —  sweep: {sweep_name}\n"
+                 "Blue = overestimate  |  Red = underestimate  |  White = exact",
+                 fontsize=10)
+    plt.colorbar(im, ax=ax, label="Signed bias  [µmol/cm³/min]")
+    ax.axvline(ITER_MAX, color="gold", lw=2, ls="--", alpha=0.7, label="final iter")
+    ax.legend(fontsize=8)
+    plt.tight_layout()
+    return fig
+
+
+def fig_true_vs_est_scatter(sweep_name, svals, arrays, signed):
+    """
+    Scatter of true CMRO2 vs estimated at final iteration.
+    Points on the diagonal = perfect estimation.
+    Colour encodes the sweep parameter; error bars = posterior σ.
+    """
+    meta  = SWEEP_META[sweep_name]
+    est_f = arrays["cmro2_mean"][:, -1]
+    std_f = arrays["cmro2_std"][:, -1]
+    true_f = svals if sweep_name == "cmro2_true" else np.full(len(svals), DEF_CMRO2)
+    colors = _colors(len(svals), "plasma")
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    mn = min(true_f.min(), est_f.min()) * 0.9
+    mx = max(true_f.max(), est_f.max()) * 1.1
+    ax.plot([mn, mx], [mn, mx], "k--", lw=1.2, label="perfect estimation (y=x)")
+    ax.fill_between([mn, mx], [mn*0.9, mx*0.9], [mn*1.1, mx*1.1],
+                    alpha=0.06, color="grey", label="±10% band")
+
+    for idx, val in enumerate(svals):
+        ax.errorbar(true_f[idx], est_f[idx],
+                    yerr=std_f[idx],
+                    fmt="o", color=colors[idx], ecolor=colors[idx],
+                    elinewidth=1.5, capsize=4, ms=7,
+                    label=meta[1](val))
+
+    ax.set_xlabel("True CMRO2  [µmol/cm³/min]", fontsize=10)
+    ax.set_ylabel("Estimated CMRO2  [µmol/cm³/min]", fontsize=10)
+    ax.set_title(f"True vs Estimated (final iteration)\n"
+                 f"sweep: {sweep_name}  —  points above diagonal = overestimate",
+                 fontsize=10)
+    ax.legend(fontsize=8, ncol=2)
+    ax.set_xlim(mn, mx); ax.set_ylim(mn, mx)
+    ax.set_aspect("equal")
+    ax.grid(True, alpha=0.2)
+    plt.tight_layout()
+    return fig
+
+
+def fig_residual_distribution(sweep_name, svals, signed):
+    """
+    Histogram + KDE of signed residuals at final iteration for each sweep value.
+    Stacked vertically; zero line on each panel.
+    """
+    meta   = SWEEP_META[sweep_name]
+    colors = _colors(len(svals))
+    n      = len(svals)
+
+    fig, axes = plt.subplots(n, 1, figsize=(8, max(6, n * 1.6)), sharex=True)
+    if n == 1:
+        axes = [axes]
+
+    for idx, (val, ax) in enumerate(zip(svals, axes)):
+        # signed[:, -1] is a single number per sweep value (one run).
+        # To get a distribution we use the ensemble: true − ensemble_members * C2M.
+        # If ensemble array is saved use it; otherwise just show the point estimate.
+        sb = signed[idx, -1]
+        ax.axvline(0, color="k", lw=1.2, ls="--")
+        ax.axvline(sb, color=colors[idx], lw=2,
+                   label=f"final residual: {sb:+.3f}")
+        ax.set_yticks([])
+        ax.set_ylabel(meta[1](val), fontsize=8, rotation=0, labelpad=40)
+        ax.legend(fontsize=7, loc="upper right")
+        ax.set_xlim(-2, 2)
+        ax.grid(True, axis="x", alpha=0.2)
+
+    axes[-1].set_xlabel("Signed bias (true − est)  [µmol/cm³/min]", fontsize=10)
+    fig.suptitle(f"Signed residual at final iteration  —  sweep: {sweep_name}\n"
+                 "Right of zero = underestimate  |  Left = overestimate",
+                 fontweight="bold", fontsize=11)
+    plt.tight_layout()
+    return fig
+
+
+# ══════════════════════════════════════════════════════
+# CROSS-SWEEP SIGNED BIAS
+# ══════════════════════════════════════════════════════
+
+def fig_cross_signed(pA, valsA, pB, valsB, arrays, title):
+    """
+    Diverging heatmap of signed bias for one cross-sweep.
+    If signed_bias_grid.npy exists, use it directly.
+    Otherwise reconstruct from bias_grid (no sign info — warn user).
+    """
+    metaA = SWEEP_META[pA]
+    metaB = SWEEP_META[pB]
+
+    if "signed_bias_grid" in arrays:
+        signed_g = arrays["signed_bias_grid"]
+        note = ""
+    else:
+        # Old run: signed_bias_grid not saved. We can't recover sign from |bias| alone.
+        print(f"  [INFO] signed_bias_grid.npy not found for {pA}_x_{pB}. "
+              f"Showing |bias| with a warning.")
+        signed_g = arrays.get("bias_grid", None)
+        note = "  ⚠  signed_bias_grid not available — showing |bias| instead"
+
+    if signed_g is None:
+        print(f"  [WARN] no bias data for {pA}_x_{pB}, skipping.")
+        return None
+
+    norm  = _diverging_norm(signed_g)
+    xlbls = [metaB[1](v) for v in valsB]
+    ylbls = [metaA[1](v) for v in valsA]
+
+    fig, ax = plt.subplots(figsize=(max(6, len(valsB)*1.2 + 2),
+                                    max(4, len(valsA)*0.9 + 2)))
+    im = ax.imshow(signed_g, cmap="RdBu", norm=norm, aspect="auto", origin="upper")
+    ax.set_xticks(range(len(valsB))); ax.set_yticks(range(len(valsA)))
+    ax.set_xticklabels(xlbls, rotation=35, ha="right", fontsize=9)
+    ax.set_yticklabels(ylbls, fontsize=9)
+    ax.set_xlabel(metaB[0], fontsize=10)
+    ax.set_ylabel(metaA[0], fontsize=10)
+
+    for r in range(len(valsA)):
+        for c in range(len(valsB)):
+            v = signed_g[r, c]
+            ax.text(c, r, f"{v:+.2f}", ha="center", va="center",
+                    fontsize=8, fontweight="bold",
+                    color="white" if abs(v) > abs(signed_g).max()*0.6 else "black")
+
+    plt.colorbar(im, ax=ax, label="Signed bias (true − est)  [µmol/cm³/min]")
+    ax.set_title(f"2D cross-sweep signed bias  —  {title}\n"
+                 f"Blue = overestimate  |  Red = underestimate  |  White = exact{note}",
+                 fontsize=10)
+    plt.tight_layout()
+    return fig
+
+
+# ══════════════════════════════════════════════════════
+# SUMMARY FIGURE
+# ══════════════════════════════════════════════════════
+
+def fig_summary_signed(all_signed_finals, all_svals):
+    """
+    2×3 grid: one horizontal bar chart per OAT sweep at final iteration.
+    Mirrors the absolute bias summary but shows sign.
+    """
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    axes = axes.flatten()
+
+    for idx, sweep_name in enumerate(OAT_SWEEPS):
+        ax    = axes[idx]
+        meta  = SWEEP_META[sweep_name]
+        svals = all_svals[sweep_name]
+        finals= all_signed_finals[sweep_name]
+        x     = np.arange(len(svals))
+        clrs  = ["#D85A30" if v > 0 else "#378ADD" for v in finals]
+
+        bars = ax.bar(x, finals, color=clrs, edgecolor="k",
+                      linewidth=0.5, alpha=0.85)
+        ax.axhline(0, color="k", lw=1.2, ls="--")
+        ax.bar_label(bars, fmt="%+.3f", fontsize=6, padding=2)
+        ax.set_xticks(x)
+        ax.set_xticklabels([meta[1](v) for v in svals],
+                           rotation=28, ha="right", fontsize=7)
+        ax.set_xlabel(meta[0], fontsize=8)
+        ax.set_ylabel("Signed bias  [µmol/cm³/min]", fontsize=8)
+        ax.set_title(sweep_name, fontsize=9, fontweight="bold")
+        ax.grid(True, axis="y", alpha=0.3)
+
+    for idx in range(len(OAT_SWEEPS), len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle("Signed CMRO2 bias at Final Iteration  —  All OAT Sweeps\n"
+                 "Orange = underestimate  |  Blue = overestimate  |  Zero line = perfect",
+                 fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    return fig
+
+
+# ══════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════
+
+def main():
+    all_signed_finals = {}
+    all_svals         = {}
+
+    # ── A. OAT sweeps ───────────────────────────────
+    for sweep_name in OAT_SWEEPS:
+        print(f"\n{'='*55}")
+        print(f"  OAT  ·  {sweep_name}")
+        print(f"{'='*55}")
+
+        arrays, svals = load_oat(sweep_name)
+        if arrays is None:
+            print(f"  Skipping {sweep_name} (data not found)")
+            continue
+
+        # Reconstruct signed bias from saved cmro2_mean + sweep_values
+        signed = _signed(arrays, svals,
+                         cmro2_true_override=sweep_name if sweep_name == "cmro2_true"
+                         else None)
+
+        all_signed_finals[sweep_name] = signed[:, -1]
+        all_svals[sweep_name]         = svals
+
+        sub = os.path.join(OUT_PATH, "oat", sweep_name)
+        os.makedirs(sub, exist_ok=True)
+
+        # Save signed bias array for this sweep
+        np.save(os.path.join(sub, "signed_bias.npy"), signed)
+
+        # 1. Convergence: true vs est + signed bias + posterior σ
+        fig = fig_convergence(sweep_name, svals, arrays, signed)
+        fig.savefig(os.path.join(sub, "signed_bias_convergence.png"),
+                    dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ signed_bias_convergence.png")
+
+        # 2. Final-iteration signed bar + true vs est scatter with σ
+        fig = fig_final_signed_bar(sweep_name, svals, arrays, signed)
+        fig.savefig(os.path.join(sub, "signed_bias_final.png"),
+                    dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ signed_bias_final.png")
+
+        # 3. Heatmap (diverging, sweep × iteration)
+        fig = fig_signed_heatmap(sweep_name, svals, signed)
+        fig.savefig(os.path.join(sub, "signed_bias_heatmap.png"),
+                    dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ signed_bias_heatmap.png")
+
+        # 4. True vs estimated scatter (identity line)
+        fig = fig_true_vs_est_scatter(sweep_name, svals, arrays, signed)
+        fig.savefig(os.path.join(sub, "true_vs_est_scatter.png"),
+                    dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ true_vs_est_scatter.png")
+
+        # 5. Residual panel
+        fig = fig_residual_distribution(sweep_name, svals, signed)
+        fig.savefig(os.path.join(sub, "residual_panel.png"),
+                    dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ residual_panel.png")
+
+        # Console summary
+        meta = SWEEP_META[sweep_name]
+        print(f"\n  {'Sweep value':<22} {'true':>7} {'est':>7} {'signed bias':>12} {'post σ':>8}")
+        print(f"  {'-'*58}")
+        for i, v in enumerate(svals):
+            true_v = v if sweep_name == "cmro2_true" else DEF_CMRO2
+            est_v  = arrays["cmro2_mean"][i, -1]
+            sb     = signed[i, -1]
+            std_v  = arrays["cmro2_std"][i, -1]
+            flag   = "  ← underest" if sb > 0.1 else ("  ← overest" if sb < -0.1 else "")
+            print(f"  {meta[1](v):<22} {true_v:>7.3f} {est_v:>7.3f} {sb:>+12.4f} {std_v:>8.4f}{flag}")
+
+    # ── B. Summary figure ───────────────────────────
+    if all_signed_finals:
+        print("\n--- Summary figure ---")
+        fig = fig_summary_signed(all_signed_finals, all_svals)
+        fig.savefig(os.path.join(OUT_PATH, "SUMMARY_signed_bias.png"),
+                    dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  ✓ SUMMARY_signed_bias.png")
+
+    # ── C. Cross-sweep signed heatmaps ──────────────
+    for (pA, pB, title) in CROSS_PAIRS:
+        print(f"\n  CROSS  ·  {pA}_x_{pB}")
+        arrays = load_cross(pA, pB)
+        if arrays is None:
+            continue
+
+        valsA = arrays.get("vals_A")
+        valsB = arrays.get("vals_B")
+        if valsA is None or valsB is None:
+            print(f"  [WARN] vals_A/vals_B missing, skipping cross {pA}_x_{pB}")
+            continue
+
+        fig = fig_cross_signed(pA, valsA, pB, valsB, arrays, title)
+        if fig is not None:
+            sub = os.path.join(OUT_PATH, "cross", f"{pA}_x_{pB}")
+            os.makedirs(sub, exist_ok=True)
+            fig.savefig(os.path.join(sub, "signed_bias_cross.png"),
+                        dpi=200, bbox_inches="tight")
+            plt.close(fig)
+            print(f"  ✓ signed_bias_cross.png")
+
+    print(f"\n✅  All done — output in {OUT_PATH}")
+
+
+if __name__ == "__main__":
+    main()

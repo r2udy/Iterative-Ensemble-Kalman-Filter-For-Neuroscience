@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEnKF · Prior to Posterior</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: #f9f7f3;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 300;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 48px 32px;
+  }
+  .title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #9a9488;
+    margin-bottom: 40px;
+    text-align: center;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    width: 100%;
+    max-width: 920px;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    border-bottom: 1.5px solid #c8c2b8;
+  }
+  .panel-label {
+    text-align: center;
+  }
+  .panel-label .tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #9a9488;
+    display: block;
+    margin-bottom: 3px;
+  }
+  .panel-label .name {
+    font-size: 0.88rem;
+    color: #2a2520;
+    font-weight: 400;
+  }
+  /* connector arrow */
+  .arrow-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    width: 100%;
+    max-width: 920px;
+    position: relative;
+    height: 0;
+    margin-top: -2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="title">IEnKF &nbsp;·&nbsp; ensemble distribution — prior to posterior</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const STEPS = [
+  {
+    tag: 'Prior',
+    name: 'Uniform prior',
+    shape: 'uniform',
+    color: '#aab0c0',
+    fill: 'rgba(170,176,192,0.18)'
+  },
+  {
+    tag: 'Iteration 1–2',
+    name: 'First updates',
+    shape: 'early',
+    color: '#7a9abf',
+    fill: 'rgba(122,154,191,0.18)'
+  },
+  {
+    tag: 'Iteration 3–4',
+    name: 'Converging',
+    shape: 'mid',
+    color: '#4a7fbf',
+    fill: 'rgba(74,127,191,0.18)'
+  },
+  {
+    tag: 'Posterior',
+    name: 'Tight Gaussian',
+    shape: 'posterior',
+    color: '#1a4f8a',
+    fill: 'rgba(26,79,138,0.15)'
+  }
+];
+
+const TRUE_X = 0.62; // truth location (normalised 0–1)
+
+function gaussian(x, mu, sigma) {
+  return Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
+}
+
+function getY(shape, x) {
+  switch (shape) {
+    case 'uniform':
+      // nearly flat with very soft cosine taper at edges
+      return 0.7 + 0.06 * Math.cos((x - 0.5) * Math.PI * 1.4);
+
+    case 'early':
+      // wide, slightly asymmetric, soft peak forming near truth
+      return 0.15 * gaussian(x, TRUE_X, 0.28)
+           + 0.55 * gaussian(x, 0.5,    0.38)
+           + 0.08;
+
+    case 'mid':
+      // clearly peaked, moderate width
+      return 0.9  * gaussian(x, TRUE_X, 0.12)
+           + 0.04 * gaussian(x, 0.35,   0.18)
+           + 0.02;
+
+    case 'posterior':
+      // tight Gaussian centred on truth
+      return gaussian(x, TRUE_X, 0.045);
+  }
+}
+
+// normalise so max = 1
+function buildCurve(shape, steps=300) {
+  const raw = [];
+  for (let i = 0; i <= steps; i++) raw.push(getY(shape, i / steps));
+  const max = Math.max(...raw);
+  return raw.map(v => v / max);
+}
+
+function drawPanel(canvas, step) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pad = { l: 12, r: 12, t: 18, b: 8 };
+  const pw = W - pad.l - pad.r;
+  const ph = H - pad.t - pad.b;
+
+  const curve = buildCurve(step.shape);
+
+  // filled area
+  ctx.beginPath();
+  curve.forEach((v, i) => {
+    const x = pad.l + (i / (curve.length - 1)) * pw;
+    const y = pad.t + ph - v * ph;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.lineTo(pad.l + pw, pad.t + ph);
+  ctx.lineTo(pad.l,      pad.t + ph);
+  ctx.closePath();
+  ctx.fillStyle = step.fill;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  curve.forEach((v, i) => {
+    const x = pad.l + (i / (curve.length - 1)) * pw;
+    const y = pad.t + ph - v * ph;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = step.color;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // truth line
+  const tx = pad.l + TRUE_X * pw;
+  ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = 'rgba(180,100,50,0.55)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(tx, pad.t - 4);
+  ctx.lineTo(tx, pad.t + ph);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // truth label on last panel
+  if (step.shape === 'posterior') {
+    ctx.fillStyle = 'rgba(180,100,50,0.7)';
+    ctx.font = '500 10px IBM Plex Mono';
+    ctx.textAlign = 'center';
+    ctx.fillText('Truth', tx, pad.t - 6);
+    ctx.textAlign = 'left';
+  }
+}
+
+// Build DOM
+const grid = document.getElementById('grid');
+STEPS.forEach((step, i) => {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+
+  const canvas = document.createElement('canvas');
+  canvas.style.height = '160px';
+  canvas.style.borderBottom = `1.5px solid ${step.color}44`;
+
+  const label = document.createElement('div');
+  label.className = 'panel-label';
+  label.innerHTML = `<span class="tag">${step.tag}</span><span class="name">${step.name}</span>`;
+
+  panel.appendChild(canvas);
+  panel.appendChild(label);
+  grid.appendChild(panel);
+
+  // defer draw until layout is ready
+  requestAnimationFrame(() => drawPanel(canvas, step));
+});
+
+window.addEventListener('resize', () => {
+  document.querySelectorAll('canvas').forEach((c, i) => drawPanel(c, STEPS[i]));
+});
+</script>
+</body>
+</html>

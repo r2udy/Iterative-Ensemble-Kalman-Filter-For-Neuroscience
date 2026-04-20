@@ -1,0 +1,60 @@
+github id:
+Model: FEM -> confounded radii R_0 and R_t
+State: [M]
+n_ensembles = 50
+iteration per configuration (iteration_max) = 10
+range of cmro2 = [1.0, 1.5, 2.0, 2.5, 3.0] 
+D = 4.0e3
+alpha = 1.39e-15
+
+# Initial guess: Uniform distribution for cmro2
+# --------------------------
+# Constants initial #   
+D = 4.0e3
+alpha = 1.39e-15
+cmro2_by_M = (60 * D * alpha * 1e12)
+grid_size = 20 # data size
+
+cmro2_lower, cmro2_upper = 1.0, 3.0
+cmro2_mean_inital = 2.0  # initial mean
+cmro2_var_initial = .5**2 
+cmro2_var = .5**2  # Uniform distribution variance
+M_var = cmro2_var / cmro2_by_M**2  # model uncertainty scaled
+
+# Prior associated with R0
+# R0_lower, R0_upper = 70., 100.
+R0_mean_initial = 100.
+R0_var_initial = 2.**2
+R0_var = 2.**2 # prior uncertainty of capillary-free space radius
+
+# Prior associated with pvessel
+# pvessel_lower, pvessel_upper = 85., 95.
+pvessel_mean_initial = 80.
+pvessel_var_initial = 5.**2 
+pvessel_var = 5.**2 # prior uncertainty of Neumann boundary condition
+
+# Observation variance parameters
+obs_var_constant = 20.**2   # constant uncertainty of measurements in the observation covariance matrix R
+sigma = 2.0  # Gaussian filter sigma for observation noise smoothing
+obs_var_high = 5.**2    # high uncertainty of measurements
+obs_var_low = 1.**2     # low uncertainty of measurements
+
+
+# Synthetic Data
+[1., 1.5, 2., 2.5, 3.] umol /cm^3 /min
+Gaussian White noise: sigma=2
+
+# Covariance matrix
+B   = np.array([[M_var,    0.0,        0.0],
+                [0.0,      R0_var,     0.0],
+                [0.0,   0.0,           pvessel_var]])   # Background covariance matrix
+R = obs_var * np.eye(obs_dim)   # Observation covariance matrixservation covariance matrix
+
+p_vessel: True p_vessel=80.0
+R_art: 	True R_art=17.
+R_0: 	True R_0=100.
+
+# Finite Element Method
+Library: FEniCS
+Mesh center: (0, 0, 0)
+Mesh size: 200x200

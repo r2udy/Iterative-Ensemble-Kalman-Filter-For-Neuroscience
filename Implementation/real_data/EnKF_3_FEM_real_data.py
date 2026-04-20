@@ -59,7 +59,7 @@ uniform_dataset = load_data(py_data_location + 'uniform_dataset.txt')
 
 # --------------------------
 # Path for saving the data
-file_id_saving = "Test_stats/36_aug"  # ID for saving the data
+file_id_saving = "Test_stats/32_aug_corrected"  # ID for saving the data
 path = "/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/EnKF_plots/" + file_id_saving + "/"
 
 # --------------------------
@@ -83,7 +83,7 @@ R0_var = 2.**2 # prior uncertainty of capillary-free space radius
 
 # Prior associated with pvessel
 # pvessel_lower, pvessel_upper = 85., 95.
-pvessel_mean_initial = 70.
+pvessel_mean_initial = 80.
 pvessel_var_initial = 5.**2 
 pvessel_var = 5.**2 # prior uncertainty of Neumann boundary condition
 
@@ -101,8 +101,6 @@ obs_dim = 400
 n_ensembles = 50
 
 # Initialize the ensemble
-# a = np.array([cmro2_lower / cmro2_by_M, R0_lower, pvessel_lower])
-# b = np.array([cmro2_upper / cmro2_by_M, R0_upper, pvessel_upper])
 
 a = np.array([cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial, 
               cmro2_mean_inital / cmro2_by_M,       R0_mean_initial, pvessel_mean_initial,
@@ -256,6 +254,23 @@ for i, entry in enumerate(uniform_dataset):
     print(f'Rves: {Rves}')
 
     hole_estimated = [HoleGeometry(center=(*center, 0.0), cmro2=cmro2_mean, Pves=pvessel_mean, radius_ves=Rves, radius_0=R0_mean)]
+
+    # # Identify additional holes from observation data
+    # peaks = enkf.find_local_maxima(obs, neighborhood=3, threshold_rel=0.35, smooth_sigma=1.0)
+    # peaks = np.sort(peaks, key=lambda x: x['value'], reverse=True)
+    # peaks = peaks[1:]  # Exclude the highest peak (assumed to be the main arteriole)
+
+    # for i, p in enumerate(peaks):
+    #     hole_estimated.append(
+    #         HoleGeometry(
+    #             center=enkf.index_to_coordinates(p['index'], X_axis, Y_axis),
+    #             Pves=p['value'],
+    #             radius_ves=Rves/2.0,
+    #             marker=params.marker + 1 + i,
+    #             bc_type="robin",
+    #             permeability=1.5e-1
+    #         )
+    #     )
 
     generator_enkf = MapGenerator(
                         holes=hole_estimated,

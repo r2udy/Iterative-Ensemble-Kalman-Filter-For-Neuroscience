@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uncertainty in Data Assimilation</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Source+Sans+3:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:     #f8f5ef;
+    --ink:    #1e1a14;
+    --muted:  #8a8070;
+    --prior:  #2a5fa8;
+    --obs:    #b03030;
+    --post:   #2e7d4f;
+    --border: #ddd8ce;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Source Sans 3', sans-serif;
+    font-weight: 300;
+    font-size: 1.1rem;           /* ↑ base body font */
+    padding: 48px 32px 64px;
+    max-width: 960px;
+    margin: 0 auto;
+    line-height: 1.7;
+  }
+  header { margin-bottom: 44px; }
+  header h1 {
+    font-family: 'Lora', serif;
+    font-size: 2.1rem;           /* ↑ was 1.75rem */
+    font-weight: 400;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+  header h1 em { color: var(--prior); font-style: italic; }
+  header p {
+    font-size: 1.05rem;          /* ↑ was 0.92rem */
+    color: var(--muted);
+    max-width: 620px;
+  }
+
+  .section { margin-bottom: 52px; }
+  .section-title {
+    font-family: 'Lora', serif;
+    font-size: 1.25rem;          /* ↑ was 1.05rem */
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .section-title .tag {
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 0.75rem;          /* ↑ was 0.65rem */
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .section-desc {
+    font-size: 1.0rem;           /* ↑ was 0.88rem */
+    color: var(--muted);
+    margin-bottom: 18px;
+    max-width: 680px;
+    font-style: italic;
+  }
+
+  .canvas-wrap {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .legend {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 14px;
+    font-size: 0.96rem;          /* ↑ was 0.82rem */
+    color: var(--muted);
+  }
+  .legend-item { display: flex; align-items: center; gap: 7px; }
+  .legend-swatch { width: 28px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+  .legend-swatch.dashed {
+    background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px);
+    height: 2px;
+  }
+
+  .slider-row {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: flex-end;
+  }
+  .slider-group label {
+    display: block;
+    font-size: 0.92rem;          /* ↑ was 0.78rem */
+    color: var(--muted);
+    margin-bottom: 5px;
+    font-style: italic;
+  }
+  .slider-group input[type=range] {
+    display: block;
+    width: 160px;
+    accent-color: var(--prior);
+  }
+  .slider-group .val {
+    font-size: 0.84rem;          /* ↑ was 0.72rem */
+    color: var(--muted);
+    margin-top: 3px;
+    text-align: right;
+  }
+
+  #kalman-label {
+    margin-top: 12px;
+    font-size: 0.96rem;          /* ↑ was 0.82rem */
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .two-col > div > div:first-child {
+    font-size: 0.95rem;          /* ↑ was 0.8rem */
+  }
+
+  footer {
+    margin-top: 56px;
+    font-size: 0.88rem;          /* ↑ was 0.75rem */
+    color: #bbb;
+    text-align: center;
+    font-style: italic;
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Two sources of uncertainty in<br><em>static</em> data assimilation</h1>
+  <p>In a static problem, the "model uncertainty" is a <strong>prior covariance matrix B</strong> — it encodes how spread out our initial knowledge is. The observation uncertainty is <strong>R</strong>. The analysis is a weighted average of the two.</p>
+</header>
+
+<!-- ══ PANEL 1 ══ -->
+<div class="section">
+  <div class="section-title">
+    <span>The two distributions meet</span>
+    <span class="tag">core concept</span>
+  </div>
+  <p class="section-desc">Prior (B) and observation (R) are two independent sources of knowledge. Their combination — the posterior — is always narrower than either alone.</p>
+  <div class="canvas-wrap"><canvas id="c1" height="200"></canvas></div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--prior)"></div> Prior &nbsp;<em>x<sup>b</sup></em>, width ∝ √B</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--obs)"></div> Observation &nbsp;<em>y</em>, width ∝ √R</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--post)"></div> Analysis &nbsp;<em>x<sup>a</sup></em> (posterior)</div>
+  </div>
+</div>
+
+<!-- ══ PANEL 2 ══ -->
+<div class="section">
+  <div class="section-title">
+    <span>What happens when you change B or R?</span>
+    <span class="tag">interactive</span>
+  </div>
+  <p class="section-desc">Adjust the width of each uncertainty. When B is large, we distrust the prior and pull toward the observation — and vice versa.</p>
+  <div class="slider-row">
+    <div class="slider-group">
+      <label>Prior uncertainty &nbsp;<em>√B</em></label>
+      <input type="range" id="sB" min="0.04" max="0.30" step="0.01" value="0.14">
+      <div class="val" id="vB">0.14</div>
+    </div>
+    <div class="slider-group">
+      <label>Observation error &nbsp;<em>√R</em></label>
+      <input type="range" id="sR" min="0.04" max="0.30" step="0.01" value="0.08">
+      <div class="val" id="vR">0.08</div>
+    </div>
+  </div>
+  <div class="canvas-wrap"><canvas id="c2" height="200"></canvas></div>
+  <div id="kalman-label">Kalman gain K = —</div>
+</div>
+
+<!-- ══ PANEL 3 ══ -->
+<div class="section">
+  <div class="section-title">
+    <span>The two extreme cases</span>
+    <span class="tag">limiting behaviour</span>
+  </div>
+  <p class="section-desc">The relative size of B and R determines where the analysis lands. The Kalman gain K ∈ [0, 1] is the fraction of the gap that is closed toward the observation.</p>
+  <div class="two-col">
+    <div>
+      <div style="font-size:0.95rem; color:var(--prior); font-style:italic; margin-bottom:8px;">B ≫ R &nbsp;·&nbsp; uncertain prior → trust the obs</div>
+      <div class="canvas-wrap"><canvas id="c3a" height="160"></canvas></div>
+    </div>
+    <div>
+      <div style="font-size:0.95rem; color:var(--obs); font-style:italic; margin-bottom:8px;">R ≫ B &nbsp;·&nbsp; noisy obs → trust the prior</div>
+      <div class="canvas-wrap"><canvas id="c3b" height="160"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PANEL 4 ══ -->
+<div class="section">
+  <div class="section-title">
+    <span>In 2D — the covariance matrix as an ellipse</span>
+    <span class="tag">joint uncertainty</span>
+  </div>
+  <p class="section-desc">In higher dimensions, B and R are matrices. Their shapes (ellipses) encode not just spread but also correlations between parameters. The posterior ellipse is always strictly inside both.</p>
+  <div class="canvas-wrap"><canvas id="c4" height="300"></canvas></div>
+  <div class="legend" style="margin-top:14px;">
+    <div class="legend-item"><div class="legend-swatch dashed" style="color:var(--prior)"></div> Prior covariance &nbsp;<strong>B</strong></div>
+    <div class="legend-item"><div class="legend-swatch dashed" style="color:var(--obs)"></div> Obs. error covariance &nbsp;<strong>R</strong></div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--post)"></div> Posterior &nbsp;<strong>P<sup>a</sup></strong> = (B⁻¹ + R⁻¹)⁻¹</div>
+  </div>
+</div>
+
+<!-- ══ PANEL 5 ══ -->
+<div class="section">
+  <div class="section-title">
+    <span>Ensemble reading — members carry B, observation carries R</span>
+    <span class="tag">ensemble view</span>
+  </div>
+  <p class="section-desc">Each ensemble member is one draw from the prior (B). The observation arrives with its own uncertainty (R). The update moves members toward the observation — more so when B is large relative to R.</p>
+  <div class="canvas-wrap"><canvas id="c5" height="300"></canvas></div>
+</div>
+
+<footer>Schematic · not quantitative · for illustration only</footer>
+
+<script>
+const PRIOR = '#2a5fa8', OBS = '#b03030', POST = '#2e7d4f', MUTED = '#9a9080';
+
+// ── font sizes used in canvas drawing ─────────────────────────────────────
+// All canvas text is now ~30% larger than before.
+const F_SMALL  = '13px Lora,serif';   // was 10px — axis labels, braces
+const F_MEDIUM = '15px Lora,serif';   // was 11px — peak labels, legends
+const F_LARGE  = '20px Lora,serif';   // was 13px — formula box main line
+const F_SUB    = '14px Lora,serif';   // was 11px — formula box sub-line
+const F_SANS   = '13px Source Sans 3,sans-serif'; // was 10px — panel 5 legend
+
+function norm(x, mu, sigma) {
+  return Math.exp(-0.5*((x-mu)/sigma)**2) / (sigma*Math.sqrt(2*Math.PI));
+}
+
+function getCtx(id) {
+  const c = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const W = c.offsetWidth, H = c.offsetHeight || parseInt(c.getAttribute('height'));
+  c.width = W * dpr; c.height = H * dpr;
+  const ctx = c.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx, W, H };
+}
+
+function sketchAxis(ctx, x0, y0, x1, y1, label='', labelSide='bottom') {
+  ctx.beginPath();
+  ctx.strokeStyle = '#bbb'; ctx.lineWidth = 1;
+  ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+  const dx=x1-x0, dy=y1-y0, L=Math.hypot(dx,dy);
+  const ux=dx/L, uy=dy/L, px=-uy, py=ux;
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1-8*ux+4*px, y1-8*uy+4*py);
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x1-8*ux-4*px, y1-8*uy-4*py);
+  ctx.stroke();
+  if (label) {
+    ctx.fillStyle = '#aaa'; ctx.font = F_MEDIUM;
+    ctx.textAlign = 'center';
+    if (labelSide === 'bottom') ctx.fillText(label, (x0+x1)/2, y1+20);
+    if (labelSide === 'left') {
+      ctx.save(); ctx.translate(x0-16,(y0+y1)/2); ctx.rotate(-Math.PI/2);
+      ctx.fillText(label,0,0); ctx.restore();
+    }
+  }
+}
+
+// ── PANEL 1 ───────────────────────────────────────────────────────────────
+function drawC1() {
+  const { ctx, W, H } = getCtx('c1');
+  const pad = { l:30, r:20, t:36, b:38 };
+  const pw = W-pad.l-pad.r, ph = H-pad.t-pad.b;
+  ctx.clearRect(0, 0, W, H);
+
+  const xb=0.33, sb=0.13, xo=0.70, so=0.08;
+  const sa2 = 1/(1/sb**2+1/so**2);
+  const xa  = sa2*(xb/sb**2 + xo/so**2);
+  const sa  = Math.sqrt(sa2);
+  const xs  = Array.from({length:300},(_,i)=>i/299);
+
+  function toCanvasX(v) { return pad.l + v*pw; }
+  function scaledPdf(mu, sig, scale=1) {
+    const ys = xs.map(x=>norm(x,mu,sig));
+    const mx = Math.max(...ys);
+    return ys.map(y=>pad.t + ph - (y/mx)*ph*scale);
+  }
+
+  [[xb,sb,PRIOR,0.10],[xo,so,OBS,0.10],[xa,sa,POST,0.14]].forEach(([mu,sig,col,a])=>{
+    const ys = scaledPdf(mu,sig,0.85);
+    ctx.beginPath();
+    xs.forEach((x,i)=>{ i===0?ctx.moveTo(toCanvasX(x),ys[i]):ctx.lineTo(toCanvasX(x),ys[i]); });
+    ctx.lineTo(toCanvasX(xs[xs.length-1]), pad.t+ph);
+    ctx.lineTo(toCanvasX(xs[0]), pad.t+ph);
+    ctx.closePath();
+    ctx.fillStyle=col; ctx.globalAlpha=a; ctx.fill(); ctx.globalAlpha=1;
+  });
+
+  [[xb,sb,PRIOR,1.8],[xo,so,OBS,1.8],[xa,sa,POST,2.2]].forEach(([mu,sig,col,lw])=>{
+    const ys = scaledPdf(mu,sig,0.85);
+    ctx.beginPath();
+    xs.forEach((x,i)=>{ i===0?ctx.moveTo(toCanvasX(x),ys[i]):ctx.lineTo(toCanvasX(x),ys[i]); });
+    ctx.strokeStyle=col; ctx.lineWidth=lw; ctx.stroke();
+  });
+
+  [[xb,PRIOR,'xᵇ'],[xo,OBS,'y'],[xa,POST,'xᵃ']].forEach(([xv,col,lbl])=>{
+    const cx = toCanvasX(xv);
+    ctx.setLineDash([4,4]);
+    ctx.strokeStyle=col+'99'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(cx,pad.t); ctx.lineTo(cx,pad.t+ph); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.font=F_MEDIUM; ctx.textAlign='center';
+    ctx.fillText(lbl, cx, pad.t-10);
+  });
+
+  [[xb,sb,PRIOR,'√B'],[xo,so,OBS,'√R']].forEach(([mu,sig,col,lbl])=>{
+    const y_br = pad.t+ph+16;
+    const x0_=toCanvasX(mu-sig), x1_=toCanvasX(mu+sig);
+    ctx.strokeStyle=col+'aa'; ctx.lineWidth=0.9;
+    ctx.beginPath(); ctx.moveTo(x0_,y_br-4); ctx.lineTo(x0_,y_br+4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x1_,y_br-4); ctx.lineTo(x1_,y_br+4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x0_,y_br);   ctx.lineTo(x1_,y_br);   ctx.stroke();
+    ctx.fillStyle=col; ctx.font=F_SMALL; ctx.textAlign='center';
+    ctx.fillText(lbl, toCanvasX(mu), y_br+14);
+  });
+
+  ctx.fillStyle='#f0ede6'; ctx.strokeStyle='#ddd8ce'; ctx.lineWidth=0.8;
+  ctx.beginPath(); ctx.roundRect(W/2-82, pad.t+4, 164, 44, 5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#444'; ctx.font=F_LARGE; ctx.textAlign='center';
+  ctx.fillText('xᵃ = xᵇ + K(y − xᵇ)', W/2, pad.t+22);
+  ctx.font=F_SUB; ctx.fillStyle='#888';
+  ctx.fillText('K = B · (B + R)⁻¹', W/2, pad.t+39);
+
+  sketchAxis(ctx, pad.l, pad.t+ph, pad.l+pw+10, pad.t+ph, 'state variable  x');
+}
+
+// ── PANEL 2 ───────────────────────────────────────────────────────────────
+function drawC2() {
+  const sB = parseFloat(document.getElementById('sB').value);
+  const sR = parseFloat(document.getElementById('sR').value);
+  document.getElementById('vB').textContent = sB.toFixed(2);
+  document.getElementById('vR').textContent = sR.toFixed(2);
+
+  const xb=0.30, xo=0.72;
+  const sa2 = 1/(1/sB**2+1/sR**2);
+  const xa  = sa2*(xb/sB**2 + xo/sR**2);
+  const sa  = Math.sqrt(sa2);
+  const K   = sB**2/(sB**2+sR**2);
+
+  document.getElementById('kalman-label').innerHTML =
+    `Kalman gain &nbsp;<strong>K = ${K.toFixed(3)}</strong> &nbsp;·&nbsp; `
+    + (K>0.6 ? 'analysis pulled strongly toward observation'
+     : K<0.4 ? 'analysis stays close to prior'
+              : 'analysis balanced between prior and observation');
+
+  const { ctx, W, H } = getCtx('c2');
+  const pad={l:30,r:20,t:36,b:38};
+  const pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+  ctx.clearRect(0,0,W,H);
+
+  const xs = Array.from({length:300},(_,i)=>i/299);
+  function toX(v){return pad.l+v*pw;}
+  function scaledPdf(mu,sig,sc=0.85){
+    const ys=xs.map(x=>norm(x,mu,sig));
+    const mx=Math.max(...ys);
+    return ys.map(y=>pad.t+ph-(y/mx)*ph*sc);
+  }
+
+  [[xb,sB,PRIOR,0.10],[xo,sR,OBS,0.10],[xa,sa,POST,0.14]].forEach(([mu,sig,col,a])=>{
+    const ys=scaledPdf(mu,sig);
+    ctx.beginPath();
+    xs.forEach((x,i)=>{i===0?ctx.moveTo(toX(x),ys[i]):ctx.lineTo(toX(x),ys[i]);});
+    ctx.lineTo(toX(1),pad.t+ph); ctx.lineTo(toX(0),pad.t+ph); ctx.closePath();
+    ctx.fillStyle=col; ctx.globalAlpha=a; ctx.fill(); ctx.globalAlpha=1;
+  });
+  [[xb,sB,PRIOR,1.8],[xo,sR,OBS,1.8],[xa,sa,POST,2.2]].forEach(([mu,sig,col,lw])=>{
+    const ys=scaledPdf(mu,sig);
+    ctx.beginPath();
+    xs.forEach((x,i)=>{i===0?ctx.moveTo(toX(x),ys[i]):ctx.lineTo(toX(x),ys[i]);});
+    ctx.strokeStyle=col; ctx.lineWidth=lw; ctx.stroke();
+  });
+
+  const y_arrow = pad.t+ph*0.55;
+  ctx.strokeStyle=POST+'cc'; ctx.lineWidth=1.2; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(toX(xb),y_arrow); ctx.lineTo(toX(xa),y_arrow); ctx.stroke();
+  ctx.setLineDash([]);
+  const dx = toX(xa)-toX(xb), dir = dx>0?1:-1;
+  ctx.beginPath(); ctx.fillStyle=POST;
+  ctx.moveTo(toX(xa),y_arrow);
+  ctx.lineTo(toX(xa)-dir*10,y_arrow-5);
+  ctx.lineTo(toX(xa)-dir*10,y_arrow+5);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle=POST; ctx.font=F_SMALL; ctx.textAlign='center';
+  ctx.fillText('K = '+K.toFixed(2), toX((xb+xa)/2), y_arrow-10);
+
+  [[xb,PRIOR,'xᵇ'],[xo,OBS,'y'],[xa,POST,'xᵃ']].forEach(([xv,col,lbl])=>{
+    const cx=toX(xv);
+    ctx.setLineDash([4,4]); ctx.strokeStyle=col+'88'; ctx.lineWidth=0.9;
+    ctx.beginPath(); ctx.moveTo(cx,pad.t); ctx.lineTo(cx,pad.t+ph); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.font=F_MEDIUM; ctx.textAlign='center';
+    ctx.fillText(lbl,cx,pad.t-10);
+  });
+
+  sketchAxis(ctx,pad.l,pad.t+ph,pad.l+pw+10,pad.t+ph,'state  x');
+}
+
+// ── PANEL 3 ───────────────────────────────────────────────────────────────
+function drawCase(canvasId, sB, sR, xb, xo) {
+  const { ctx, W, H } = getCtx(canvasId);
+  const pad={l:24,r:16,t:30,b:34};
+  const pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+  ctx.clearRect(0,0,W,H);
+
+  const sa2=1/(1/sB**2+1/sR**2);
+  const xa=sa2*(xb/sB**2+xo/sR**2);
+  const sa=Math.sqrt(sa2);
+  const xs=Array.from({length:300},(_,i)=>i/299);
+  const toX=v=>pad.l+v*pw;
+
+  [[xb,sB,PRIOR,0.10],[xo,sR,OBS,0.10],[xa,sa,POST,0.16]].forEach(([mu,sig,col,a])=>{
+    const ys=xs.map(x=>norm(x,mu,sig));
+    const mx=Math.max(...ys);
+    const pys=ys.map(y=>pad.t+ph-(y/mx)*ph*0.82);
+    ctx.beginPath();
+    xs.forEach((x,i)=>i===0?ctx.moveTo(toX(x),pys[i]):ctx.lineTo(toX(x),pys[i]));
+    ctx.lineTo(toX(1),pad.t+ph); ctx.lineTo(toX(0),pad.t+ph); ctx.closePath();
+    ctx.fillStyle=col; ctx.globalAlpha=a; ctx.fill(); ctx.globalAlpha=1;
+    ctx.beginPath();
+    xs.forEach((x,i)=>i===0?ctx.moveTo(toX(x),pys[i]):ctx.lineTo(toX(x),pys[i]));
+    ctx.strokeStyle=col; ctx.lineWidth=1.6; ctx.stroke();
+  });
+
+  [[xb,PRIOR,'xᵇ'],[xo,OBS,'y'],[xa,POST,'xᵃ']].forEach(([xv,col,lbl])=>{
+    ctx.setLineDash([3,3]); ctx.strokeStyle=col+'77'; ctx.lineWidth=0.8;
+    const cx=toX(xv);
+    ctx.beginPath(); ctx.moveTo(cx,pad.t); ctx.lineTo(cx,pad.t+ph); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=col; ctx.font=F_MEDIUM; ctx.textAlign='center';
+    ctx.fillText(lbl,cx,pad.t-8);
+  });
+  sketchAxis(ctx,pad.l,pad.t+ph,pad.l+pw+8,pad.t+ph,'x');
+}
+
+// ── PANEL 4 ───────────────────────────────────────────────────────────────
+function drawC4() {
+  const { ctx, W, H } = getCtx('c4');
+  ctx.clearRect(0,0,W,H);
+
+  const pad={l:55,r:55,t:44,b:56};
+  const pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+  const toX=v=>pad.l+v*pw, toY=v=>pad.t+(1-v)*ph;
+
+  sketchAxis(ctx,pad.l,pad.t+ph,pad.l+pw+10,pad.t+ph,'parameter θ₁');
+  sketchAxis(ctx,pad.l,pad.t+ph,pad.l,pad.t-8,'','left');
+  ctx.save(); ctx.translate(pad.l-32,(pad.t+pad.t+ph)/2); ctx.rotate(-Math.PI/2);
+  ctx.fillStyle='#aaa'; ctx.font=F_LARGE; ctx.textAlign='center';
+  ctx.fillText('parameter θ₂',0,0); ctx.restore();
+
+  function drawEllipse(cx,cy,cov,color,dash=true,alpha=0.12,lw=1.4) {
+    const a=cov[0][0],b_=cov[0][1],c_=cov[1][1];
+    const disc=Math.sqrt((a-c_)**2/4+b_**2);
+    const l1=(a+c_)/2+disc, l2=(a+c_)/2-disc;
+    const angle=Math.atan2(l1-a, b_)||0;
+    const rx=2.2*Math.sqrt(Math.max(0,l1))*pw;
+    const ry=2.2*Math.sqrt(Math.max(0,l2))*ph;
+    ctx.save();
+    ctx.translate(toX(cx),toY(cy)); ctx.rotate(-angle);
+    ctx.beginPath(); ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2);
+    ctx.fillStyle=color; ctx.globalAlpha=alpha; ctx.fill(); ctx.globalAlpha=1;
+    ctx.strokeStyle=color; ctx.lineWidth=lw;
+    if(dash) ctx.setLineDash([5,4]); else ctx.setLineDash([]);
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(toX(cx),toY(cy),4,0,Math.PI*2);
+    ctx.fillStyle=color; ctx.fill();
+  }
+
+  const xb=[0.33,0.48], xo=[0.68,0.58];
+  const B=[[0.018,0.012],[0.012,0.016]];
+  const R=[[0.014,-0.009],[-0.009,0.015]];
+
+  function inv2(m){ const d=m[0][0]*m[1][1]-m[0][1]*m[1][0]; return [[m[1][1]/d,-m[0][1]/d],[-m[1][0]/d,m[0][0]/d]]; }
+  function add2(a,b){ return [[a[0][0]+b[0][0],a[0][1]+b[0][1]],[a[1][0]+b[1][0],a[1][1]+b[1][1]]]; }
+  function mv2(m,v){ return [m[0][0]*v[0]+m[0][1]*v[1], m[1][0]*v[0]+m[1][1]*v[1]]; }
+  const Pa=inv2(add2(inv2(B),inv2(R)));
+  const Binv=inv2(B), Rinv=inv2(R);
+  const rhs=[Binv[0][0]*xb[0]+Binv[0][1]*xb[1]+Rinv[0][0]*xo[0]+Rinv[0][1]*xo[1],
+             Binv[1][0]*xb[0]+Binv[1][1]*xb[1]+Rinv[1][0]*xo[0]+Rinv[1][1]*xo[1]];
+  const xa=mv2(Pa,rhs);
+
+  drawEllipse(xb[0],xb[1],B,PRIOR,true,0.10);
+  drawEllipse(xo[0],xo[1],R,OBS,true,0.10);
+  drawEllipse(xa[0],xa[1],Pa,POST,false,0.18,2.2);
+
+  ctx.strokeStyle=POST+'aa'; ctx.lineWidth=1.2; ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(toX(xb[0]),toY(xb[1])); ctx.lineTo(toX(xa[0]),toY(xa[1])); ctx.stroke();
+  ctx.setLineDash([]);
+
+  [[xb,'xᵇ  (prior)',PRIOR,-20,-16],[xo,'y  (obs)',OBS,10,10],[xa,'xᵃ',POST,10,-18]].forEach(([p,lbl,col,dx,dy])=>{
+    ctx.fillStyle=col; ctx.font=F_LARGE; ctx.textAlign='left';
+    ctx.fillText(lbl, toX(p[0])+dx, toY(p[1])+dy);
+  });
+
+  // ctx.fillStyle='#999'; ctx.font=F_SMALL; ctx.textAlign='center';
+  // ctx.fillText('B encodes correlation between state variables θ₁ and θ₂', W/2, pad.t+ph+40);
+}
+
+// ── PANEL 5 ───────────────────────────────────────────────────────────────
+function drawC5() {
+  const { ctx, W, H } = getCtx('c5');
+  ctx.clearRect(0,0,W,H);
+
+  const pad={l:55,r:55,t:44,b:56};
+  const pw=W-pad.l-pad.r, ph=H-pad.t-pad.b;
+  const toX=v=>pad.l+v*pw, toY=v=>pad.t+(1-v)*ph;
+
+  sketchAxis(ctx,pad.l,pad.t+ph,pad.l+pw+10,pad.t+ph,'θ₁');
+  ctx.save(); ctx.translate(pad.l-32,(pad.t+pad.t+ph)/2); ctx.rotate(-Math.PI/2);
+  ctx.fillStyle='#aaa'; ctx.font=F_MEDIUM; ctx.textAlign='center';
+  ctx.fillText('θ₂',0,0); ctx.restore();
+
+  const xb=[0.32,0.42], xo=[0.68,0.62];
+  const B=[[0.018,0.012],[0.012,0.016]];
+  const R=[[0.014,-0.008],[-0.008,0.013]];
+
+  function inv2(m){const d=m[0][0]*m[1][1]-m[0][1]*m[1][0];return[[m[1][1]/d,-m[0][1]/d],[-m[1][0]/d,m[0][0]/d]];}
+  function add2(a,b){return[[a[0][0]+b[0][0],a[0][1]+b[0][1]],[a[1][0]+b[1][0],a[1][1]+b[1][1]]];}
+  function mv2(m,v){return[m[0][0]*v[0]+m[0][1]*v[1],m[1][0]*v[0]+m[1][1]*v[1]];}
+  function randn(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+  function sampleMVN(mu,cov,n){
+    const l00=Math.sqrt(cov[0][0]);
+    const l10=cov[1][0]/l00;
+    const l11=Math.sqrt(Math.max(0,cov[1][1]-l10*l10));
+    return Array.from({length:n},()=>{
+      const z0=randn(),z1=randn();
+      return [mu[0]+l00*z0, mu[1]+l10*z0+l11*z1];
+    });
+  }
+
+  const Pa=inv2(add2(inv2(B),inv2(R)));
+  const Binv=inv2(B),Rinv=inv2(R);
+  const rhs=[Binv[0][0]*xb[0]+Binv[0][1]*xb[1]+Rinv[0][0]*xo[0]+Rinv[0][1]*xo[1],
+             Binv[1][0]*xb[0]+Binv[1][1]*xb[1]+Rinv[1][0]*xo[0]+Rinv[1][1]*xo[1]];
+  const xa=mv2(Pa,rhs);
+
+  const priorPts = sampleMVN(xb,B,55);
+  priorPts.forEach(([x,y])=>{
+    ctx.beginPath(); ctx.arc(toX(x),toY(y),3.5,0,Math.PI*2);
+    ctx.fillStyle=PRIOR+'55'; ctx.fill();
+  });
+
+  const postPts = sampleMVN(xa,Pa,55);
+  postPts.forEach(([x,y])=>{
+    ctx.beginPath(); ctx.arc(toX(x),toY(y),3.5,0,Math.PI*2);
+    ctx.fillStyle=POST+'88'; ctx.fill();
+  });
+
+  for(let i=0;i<55;i+=5){
+    const [px,py]=priorPts[i], [qx,qy]=postPts[i];
+    ctx.strokeStyle='#bbb'; ctx.lineWidth=0.8;
+    ctx.beginPath(); ctx.moveTo(toX(px),toY(py)); ctx.lineTo(toX(qx),toY(qy)); ctx.stroke();
+  }
+
+  ctx.beginPath(); ctx.arc(toX(xo[0]),toY(xo[1]),5,0,Math.PI*2);
+  ctx.fillStyle=OBS; ctx.fill();
+  ctx.strokeStyle=OBS+'55'; ctx.lineWidth=1;
+  ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.arc(toX(xo[0]),toY(xo[1]),Math.sqrt(R[0][0])*pw*2.2,0,Math.PI*2);
+  ctx.stroke(); ctx.setLineDash([]);
+
+  [[xb,PRIOR,'prior mean  xᵇ','right'],[xa,POST,'analysis  xᵃ','left']].forEach(([p,col,lbl,align])=>{
+    ctx.beginPath(); ctx.arc(toX(p[0]),toY(p[1]),6,0,Math.PI*2);
+    ctx.fillStyle=col; ctx.strokeStyle='white'; ctx.lineWidth=1.5; ctx.fill(); ctx.stroke();
+    ctx.fillStyle=col; ctx.font=F_MEDIUM; ctx.textAlign=align;
+    const dx = align==='right'?-12:12;
+    ctx.fillText(lbl, toX(p[0])+dx, toY(p[1])-12);
+  });
+  ctx.fillStyle=OBS; ctx.font=F_MEDIUM; ctx.textAlign='left';
+  ctx.fillText('observation y (± R)', toX(xo[0])+10, toY(xo[1])-11);
+
+  ctx.fillStyle=PRIOR+'bb'; ctx.font=F_SANS; ctx.textAlign='left';
+  ctx.fillText('● prior members  (drawn from B)', pad.l+4, pad.t+20);
+  ctx.fillStyle=POST+'bb';
+  ctx.fillText('● posterior members  (updated by R)', pad.l+4, pad.t+38);
+}
+
+// ── init ──────────────────────────────────────────────────────────────────
+function drawAll() {
+  drawC1(); drawC2();
+  drawCase('c3a', 0.22, 0.06, 0.28, 0.70);
+  drawCase('c3b', 0.06, 0.22, 0.32, 0.72);
+  drawC4(); drawC5();
+}
+
+document.getElementById('sB').addEventListener('input', drawC2);
+document.getElementById('sR').addEventListener('input', drawC2);
+
+window.addEventListener('load', drawAll);
+window.addEventListener('resize', drawAll);
+</script>
+</body>
+</html>

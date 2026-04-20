@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ensemble Members in IEnKF</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Serif+4:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f3ec;
+    --ink: #1a1208;
+    --sage: #5a7a5c;
+    --rust: #b85c38;
+    --gold: #c9973a;
+    --cream: #ede8dd;
+    --leaf: #7da87f;
+    --muted: #8a7f72;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Source Serif 4', serif;
+    font-weight: 300;
+    line-height: 1.8;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 60px 40px;
+  }
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.6rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--ink);
+    margin-bottom: 8px;
+  }
+  h1 em {
+    color: var(--sage);
+    font-style: italic;
+  }
+  .subtitle {
+    font-family: 'Source Serif 4', serif;
+    font-size: 1rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    margin-bottom: 50px;
+    border-bottom: 1px solid #d0c9bc;
+    padding-bottom: 24px;
+  }
+  h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: var(--sage);
+    margin: 48px 0 16px;
+  }
+  p { margin-bottom: 18px; font-size: 1.05rem; }
+  .callout {
+    background: var(--cream);
+    border-left: 4px solid var(--gold);
+    padding: 20px 28px;
+    margin: 30px 0;
+    border-radius: 0 8px 8px 0;
+  }
+  .callout strong { color: var(--rust); font-weight: 600; }
+
+  /* Ensemble demo */
+  .demo-box {
+    background: white;
+    border: 1px solid #d8d0c4;
+    border-radius: 12px;
+    padding: 30px;
+    margin: 36px 0;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+  }
+  .demo-box h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.15rem;
+    margin-bottom: 20px;
+    color: var(--ink);
+  }
+  .ensemble-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+    min-height: 80px;
+    align-items: flex-end;
+  }
+  .member {
+    width: 40px;
+    border-radius: 6px 6px 0 0;
+    transition: all 0.5s ease;
+    position: relative;
+    cursor: pointer;
+  }
+  .member:hover { opacity: 0.85; transform: translateY(-3px); }
+  .member-label {
+    text-align: center;
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .axis-line {
+    height: 2px;
+    background: #c9c0b4;
+    margin: 0 0 6px;
+    border-radius: 2px;
+  }
+  .controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+    align-items: center;
+  }
+  button {
+    background: var(--sage);
+    color: white;
+    border: none;
+    padding: 9px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'Source Serif 4', serif;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+  }
+  button:hover { background: #4a6a4c; }
+  button.secondary {
+    background: transparent;
+    border: 1.5px solid var(--sage);
+    color: var(--sage);
+  }
+  button.secondary:hover { background: #f0f5f0; }
+  .status {
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* SVG visualisation */
+  .viz-container {
+    margin: 30px 0;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid #d8d0c4;
+    background: #fdfaf6;
+  }
+  svg { display: block; width: 100%; }
+
+  .step-list {
+    counter-reset: steps;
+    list-style: none;
+    margin: 20px 0;
+  }
+  .step-list li {
+    counter-increment: steps;
+    padding: 14px 14px 14px 58px;
+    position: relative;
+    border-bottom: 1px solid #e8e2d8;
+  }
+  .step-list li:last-child { border-bottom: none; }
+  .step-list li::before {
+    content: counter(steps);
+    position: absolute;
+    left: 16px;
+    top: 14px;
+    width: 28px;
+    height: 28px;
+    background: var(--sage);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    font-family: 'Source Serif 4', serif;
+  }
+
+  .analogy-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid #d8d0c4;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 30px 0;
+  }
+  .analogy-side {
+    padding: 24px;
+  }
+  .analogy-side:first-child {
+    background: #e8f0e8;
+    border-right: 1px solid #d8d0c4;
+  }
+  .analogy-side:last-child {
+    background: #fdfaf6;
+  }
+  .analogy-side .tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    color: var(--muted);
+  }
+  .analogy-side .tag.bio { color: var(--sage); }
+  .analogy-side .tag.math { color: var(--rust); }
+  .analogy-side p { font-size: 0.95rem; margin: 0; }
+
+  .tag-inline {
+    display: inline-block;
+    background: var(--sage);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+
+  footer {
+    margin-top: 70px;
+    padding-top: 24px;
+    border-top: 1px solid #d0c9bc;
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-align: center;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<h1>What Are <em>Ensemble Members</em>?</h1>
+<p class="subtitle">A guide to IEnKF for the biologically minded &nbsp;·&nbsp; Iterative Ensemble Kalman Filter</p>
+
+<p>Imagine you're trying to estimate something you can't observe directly — the internal state of a cell, a population's hidden dynamics, or the parameters of a gene regulatory network. You have noisy measurements, and you have a model. How do you combine them wisely?</p>
+
+<p>This is exactly what the <strong>Iterative Ensemble Kalman Filter (IEnKF)</strong> does. And the key idea at its heart is the <em>ensemble</em>.</p>
+
+<h2>The Core Idea: A Population of Guesses</h2>
+
+<p>Rather than tracking a single "best estimate" of the system state, the IEnKF maintains a <strong>population of plausible states</strong> — called <strong>ensemble members</strong>. Each member is one complete hypothesis about what the system might look like right now.</p>
+
+<div class="callout">
+  <strong>Biological analogy:</strong> Think of ensemble members like individual organisms in a population genetics simulation. Each individual carries a slightly different genome (= state). The population as a whole captures the <em>diversity of possibilities</em>. The ensemble mean is the average individual; the spread is the uncertainty.
+</div>
+
+<h2>An Interactive Ensemble</h2>
+
+<p>Below is a simple ensemble tracking one quantity — say, the intracellular concentration of a signalling molecule. Each bar is one ensemble member's estimate. Click "Observe" to see how a new data point updates (collapses) the ensemble.</p>
+
+<div class="demo-box">
+  <h3>Ensemble of 20 members tracking: [Protein X] concentration (nM)</h3>
+  <div id="ensemble-chart"></div>
+  <div class="controls">
+    <button onclick="resetEnsemble()">Reset ensemble</button>
+    <button class="secondary" onclick="observe()">Observe & update</button>
+    <span class="status" id="status">Ensemble spread = prior uncertainty</span>
+  </div>
+</div>
+
+<h2>Each Member Is a Full State Vector</h2>
+
+<p>In a real biological model, each ensemble member isn't just one number — it's a full vector describing the entire system. For a gene regulatory network with 10 genes, each member holds values for all 10 gene expression levels simultaneously, plus any unknown parameters you're trying to infer.</p>
+
+<div class="analogy-box">
+  <div class="analogy-side">
+    <div class="tag bio">🌿 Biology frame</div>
+    <p>One individual in a population: carries a full set of trait values (height, metabolism rate, receptor density…)</p>
+  </div>
+  <div class="analogy-side">
+    <div class="tag math">∑ Math frame</div>
+    <p>One ensemble member: a vector <strong>x</strong>ᵢ ∈ ℝⁿ containing all state variables and unknown parameters</p>
+  </div>
+</div>
+
+<div class="analogy-box">
+  <div class="analogy-side">
+    <div class="tag bio">🌿 Biology frame</div>
+    <p>The population distribution: tells you how spread out traits are across individuals</p>
+  </div>
+  <div class="analogy-side">
+    <div class="tag math">∑ Math frame</div>
+    <p>The ensemble: implicitly encodes the covariance matrix <strong>P</strong> — how uncertain we are and how variables co-vary</p>
+  </div>
+</div>
+
+<h2>Why Not Just Use One Estimate?</h2>
+
+<p>A single estimate would require you to explicitly write down and invert large covariance matrices — computationally brutal for high-dimensional systems. The ensemble trick is that <strong>the spread among members implicitly represents uncertainty</strong>, without ever storing a giant matrix.</p>
+
+<div class="callout">
+  With N members in a system of dimension n, you're approximating an n×n covariance matrix using just N "sample" individuals. Typically N = 20–100 members can capture the structure of a system with thousands of variables.
+</div>
+
+<h2>How the IEnKF Uses the Ensemble</h2>
+
+<ol class="step-list">
+  <li><strong>Forecast step.</strong> Run every ensemble member forward in time through your model (e.g., your ODE system). Each member evolves independently. Uncertainty grows as the members spread apart.</li>
+  <li><strong>Compare to data.</strong> When observations arrive (e.g., a fluorescence measurement), each member makes its own prediction of what the data should look like.</li>
+  <li><strong>Update step (analysis).</strong> Members that predicted data closer to the observed value get pulled toward it; others are adjusted. The ensemble collectively shifts and tightens around the observation.</li>
+  <li><strong>Iterate.</strong> The "I" in IEnKF means this update is repeated multiple times per observation window, refining the ensemble toward a better posterior — especially important for nonlinear biology.</li>
+</ol>
+
+<h2>Visualising the Update</h2>
+<div class="viz-container">
+  <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" id="update-svg"></svg>
+</div>
+<p style="text-align:center; font-size:0.85rem; color:var(--muted); margin-top:-18px; margin-bottom:30px;">
+  Prior ensemble (left) → observation arrives (centre) → posterior ensemble (right). Spread collapses; mean shifts.
+</p>
+
+<h2>The "Iterative" Part for Nonlinear Systems</h2>
+
+<p>Standard EnKF assumes your model is roughly linear — a reasonable approximation in engineering. But biological systems are famously nonlinear (think sigmoidal dose-response curves, Hill functions, bistable switches). The IEnKF addresses this by running the ensemble update as an iterative minimisation loop, re-linearising around the improving estimate at each step.</p>
+
+<div class="callout">
+  <strong>Think of it as natural selection over hypotheses.</strong> The ensemble starts as a diverse population of candidate states. Observations act like selection pressure: hypotheses that fit the data survive and reproduce; poor fits are eliminated. After several rounds, the population has converged on the most probable explanation.
+</div>
+
+<h2>Key Takeaways</h2>
+<ul style="padding-left: 24px; margin-bottom: 20px;">
+  <li style="margin-bottom: 10px;">An <strong>ensemble member</strong> is one complete, plausible state of your biological system.</li>
+  <li style="margin-bottom: 10px;">The full ensemble represents your <strong>uncertainty</strong> — wide spread = high uncertainty, tight cluster = confident estimate.</li>
+  <li style="margin-bottom: 10px;">The IEnKF repeatedly <strong>forecasts</strong> members forward, then <strong>corrects</strong> them against data, handling the nonlinearity typical of biology.</li>
+  <li style="margin-bottom: 10px;">You never need to write down a giant covariance matrix — the <strong>members are the statistics</strong>.</li>
+</ul>
+
+<footer>Ensemble Kalman Filter concepts · Prepared for a biological sciences audience</footer>
+
+<script>
+// ---- Ensemble bar chart ----
+const N = 20;
+let ensemble = [];
+let observed = false;
+
+function gaussian(mean, std) {
+  let u = 0, v = 0;
+  while(u === 0) u = Math.random();
+  while(v === 0) v = Math.random();
+  return mean + std * Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+}
+
+function resetEnsemble() {
+  observed = false;
+  ensemble = Array.from({length: N}, () => Math.max(2, gaussian(45, 18)));
+  renderBars();
+  document.getElementById('status').textContent = 'Ensemble spread = prior uncertainty. Mean ≈ ' + mean(ensemble).toFixed(1) + ' nM';
+}
+
+function observe() {
+  if (!observed) {
+    const obs = 52;
+    ensemble = ensemble.map(x => {
+      const innovation = obs - x;
+      const kalmanGain = 0.6;
+      return x + kalmanGain * innovation + gaussian(0, 3);
+    });
+    observed = true;
+    renderBars();
+    document.getElementById('status').textContent = '✓ Updated! Mean ≈ ' + mean(ensemble).toFixed(1) + ' nM  |  Spread reduced by ~40%';
+  } else {
+    document.getElementById('status').textContent = 'Click Reset to start a new cycle.';
+  }
+}
+
+function mean(arr) { return arr.reduce((a,b)=>a+b,0)/arr.length; }
+
+function renderBars() {
+  const container = document.getElementById('ensemble-chart');
+  const maxH = 100;
+  const maxVal = 100;
+  const colors = observed
+    ? ['#5a7a5c','#7da87f','#4a6a4c','#6d9870','#527055']
+    : ['#c9973a','#d4a84a','#b88530','#ca9a3d','#d4ab55'];
+
+  let html = '<div style="position:relative; height:'+(maxH+30)+'px; margin-bottom:6px;">';
+  ensemble.forEach((val, i) => {
+    const h = Math.max(4, (val / maxVal) * maxH);
+    const left = i * 38;
+    const color = colors[i % colors.length];
+    html += `<div style="position:absolute; left:${left}px; bottom:22px; width:30px; height:${h}px; background:${color}; border-radius:4px 4px 0 0; transition:all 0.6s ease; opacity:0.85;" title="${val.toFixed(1)} nM"></div>`;
+  });
+  html += '<div style="position:absolute; bottom:20px; left:0; right:0; height:2px; background:#c9c0b4;"></div>';
+  html += '<div style="position:absolute; bottom:0; left:0; font-size:0.7rem; color:#8a7f72;">0 nM</div>';
+  html += '<div style="position:absolute; bottom:0; right:0; font-size:0.7rem; color:#8a7f72;">100 nM →</div>';
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+resetEnsemble();
+
+// ---- SVG update diagram ----
+(function drawSVG() {
+  const svg = document.getElementById('update-svg');
+  const W = 760, H = 220;
+  const panels = [{x:30, label:'Prior ensemble', color:'#c9973a', mean:110, spread:35},
+                  {x:300, label:'Observation', color:'#b85c38', mean:145, spread:8},
+                  {x:560, label:'Posterior ensemble', color:'#5a7a5c', mean:138, spread:14}];
+
+  let content = '';
+  // Draw dots for prior and posterior
+  [panels[0], panels[2]].forEach(p => {
+    const cx = p.x + 90;
+    for(let i=0;i<30;i++){
+      const dx = (Math.random()-0.5)*p.spread*2.5;
+      const dy = (Math.random()-0.5)*p.spread*1.2;
+      content += `<circle cx="${cx+dx}" cy="${H/2+dy}" r="4" fill="${p.color}" opacity="0.55"/>`;
+    }
+    content += `<line x1="${cx}" y1="${H/2-p.spread*1.2-10}" x2="${cx}" y2="${H/2+p.spread*1.2+10}" stroke="${p.color}" stroke-width="2.5" opacity="0.9"/>`;
+    content += `<circle cx="${cx}" cy="${H/2}" r="7" fill="${p.color}" opacity="1"/>`;
+    content += `<text x="${cx}" y="${H-16}" text-anchor="middle" font-family="Source Serif 4,serif" font-size="12" fill="#8a7f72">${p.label}</text>`;
+  });
+
+  // Observation line
+  const ocx = panels[1].x + 90;
+  content += `<line x1="${ocx}" y1="30" x2="${ocx}" y2="${H-30}" stroke="${panels[1].color}" stroke-width="2" stroke-dasharray="5,4" opacity="0.7"/>`;
+  content += `<rect x="${ocx-28}" y="${H/2-10}" width="56" height="20" rx="4" fill="${panels[1].color}" opacity="0.12"/>`;
+  content += `<text x="${ocx}" y="${H/2+5}" text-anchor="middle" font-family="Source Serif 4,serif" font-size="11" font-weight="600" fill="${panels[1].color}">y_obs</text>`;
+  content += `<text x="${ocx}" y="${H-16}" text-anchor="middle" font-family="Source Serif 4,serif" font-size="12" fill="#8a7f72">${panels[1].label}</text>`;
+
+  // Arrows
+  content += `<path d="M ${panels[0].x+180} ${H/2} Q ${ocx-20} ${H/2-30} ${ocx-38} ${H/2}" stroke="#ccc" fill="none" stroke-width="1.5" marker-end="url(#arr)"/>`;
+  content += `<path d="M ${ocx+38} ${H/2} Q ${panels[2].x+60} ${H/2-30} ${panels[2].x+80} ${H/2}" stroke="#ccc" fill="none" stroke-width="1.5" marker-end="url(#arr)"/>`;
+  content += `<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6" fill="none" stroke="#aaa" stroke-width="1.5"/></marker></defs>`;
+
+  svg.innerHTML = content;
+})();
+</script>
+</body>
+</html>

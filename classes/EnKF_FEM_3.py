@@ -111,7 +111,7 @@ class EnKF:
         # Extract parameters from state
         cmro2   = state[0] * self.cmro2_by_M
         Pves    = state[2]
-        Rves    = np.diff(X[0])[0]
+        Rves    = 17.5#np.diff(X[0])[0]
         R0      = state[1]
         center  = (0.0, 0.0)
         marker = 3
@@ -125,9 +125,13 @@ class EnKF:
 
         # Create solver parameters
         params = SolverParameters(filename="square_one_hole")
+
         # Define holes
-        holes = [ HoleGeometry(center=(*center, 0), cmro2=cmro2, Pves=Pves, radius_ves=Rves, radius_0=R0, marker=3),
-            ]
+        holes = [HoleGeometry(center=(*center, 0), 
+                              cmro2=cmro2, Pves=Pves, 
+                              radius_ves=Rves, 
+                              radius_0=R0, marker=3),
+        ]
 
         # Generate mesh
         solver.generate_mesh(holes)
@@ -215,7 +219,7 @@ class EnKF:
         obs_mean    = np.mean(obs_model_ensembles, axis=1)
         state_deviation     = self.ensemble - state_mean[:, np.newaxis]
         obs_deviation       = obs_model_ensembles - obs_mean[:, np.newaxis]
-        
+
         # Augmented observed ensemble
         R0_obs_pert = self.rng.normal(
             loc=self.R0_prior,
@@ -237,7 +241,7 @@ class EnKF:
         obs_mean_aug = np.mean(obs_model_ensembles_aug, axis=1)
         obs_deviation_aug = obs_model_ensembles_aug - obs_mean_aug[:, np.newaxis]
 
-        R_aug = np.block([
+        Q = np.block([
             [self.R,                        np.zeros((self.obs_dim, 1))],
             [np.zeros((1, self.obs_dim)),   np.array([[self.sigma_R0**2]])]
         ])
@@ -245,13 +249,15 @@ class EnKF:
         # A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
         self.A_BHT = (state_deviation @ obs_deviation_aug.T) / (self.n_ensembles - 1)
         self.A_HBHT = (obs_deviation_aug @ obs_deviation_aug.T) / (self.n_ensembles - 1)
-        self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + R_aug)
+        self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + Q)
         
             # 3. Update ensemble: innovation = (perturbed) observation - model prediction (both augmented)
         self.innovation_aug = obs_ensemble_aug - obs_model_ensembles_aug
         # keep legacy attribute name for external code compatibility
         self.innovation = self.innovation_aug
         self.ensemble += self.length_scale * self.K @ self.innovation_aug
+
+        
 
         # Compute NIS on the original (unaugmented) observation space
         A_HBHT_unaug = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heat Equation — Sanity & Identifiability</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap');
+
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+  :root {
+    --bg:      #f7f8fc;
+    --card:    #ffffff;
+    --border:  #e4e8f0;
+    --text:    #1e2130;
+    --muted:   #7a7f94;
+    --sanity:  #2c7bb6;
+    --ident:   #7c4dbd;
+    --accent:  #e8a838;
+  }
+
+  body {
+    background: var(--bg);
+    font-family: 'Inter', sans-serif;
+    color: var(--text);
+    min-height: 100vh;
+    padding: 28px 24px 40px;
+  }
+
+  /* ── Header ── */
+  .page-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .page-header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    color: var(--text);
+  }
+  .page-header p {
+    margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .badge-row {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .badge {
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .badge.sanity { background: #deeef9; color: var(--sanity); }
+  .badge.ident  { background: #ece6f7; color: var(--ident); }
+
+  /* ── Section titles ── */
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 0 4px 10px;
+    border-bottom: 2px solid;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title.sanity { color: var(--sanity); border-color: var(--sanity); }
+  .section-title.ident  { color: var(--ident);  border-color: var(--ident); }
+
+  /* ── Grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    max-width: 1200px;
+    margin: 0 auto 20px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 18px 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    display: flex;
+    flex-direction: column;
+  }
+  .card-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+  }
+  svg.chart { width:100%; overflow:visible; }
+  .card-note {
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.55;
+    font-style: italic;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+  .card-note span {
+    font-family: 'JetBrains Mono', monospace;
+    font-style: normal;
+    color: var(--accent);
+  }
+
+  /* axis */
+  .axis path, .axis line { stroke: #ccc; }
+  .axis text { fill: #888; font-size: 9px; font-family: 'JetBrains Mono', monospace; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Analytical solution — sanity checks &amp; identifiability insights</h1>
+  <p>∂u/∂t = α ∂²u/∂x²&nbsp;&nbsp;·&nbsp;&nbsp;u(x,0) = sin x + 0.4 sin 3x + 0.12 sin 5x + 0.04 sin 7x&nbsp;&nbsp;·&nbsp;&nbsp;u(0,t) = u(π,t) = 0</p>
+  <div class="badge-row">
+    <span class="badge sanity">① ② ③ — Sanity checks</span>
+    <span class="badge ident">④ ⑤ ⑥ — Identifiability</span>
+  </div>
+</div>
+
+<!-- SANITY ROW -->
+<div style="max-width:1200px;margin:0 auto 8px;">
+  <div class="section-title sanity">
+    <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="#2c7bb6"/></svg>
+    Sanity checks — what the analytical solution must satisfy
+  </div>
+</div>
+<div class="grid" id="sanity-grid"></div>
+
+<!-- IDENT ROW -->
+<div style="max-width:1200px;margin:16px auto 8px;">
+  <div class="section-title ident">
+    <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="#7c4dbd"/></svg>
+    Identifiability — can we infer α from data?
+  </div>
+</div>
+<div class="grid" id="ident-grid"></div>
+
+<script>
+// ── Math helpers ──────────────────────────────────────────────
+const PI = Math.PI;
+const modes = [[1,1.0],[3,0.4],[5,0.12],[7,0.04]];
+
+function uxt(x, t, alpha) {
+  return modes.reduce((s,[n,a]) => s + a*Math.sin(n*x)*Math.exp(-alpha*n*n*t), 0);
+}
+
+function linspace(a, b, n) {
+  return Array.from({length:n}, (_,i) => a + (b-a)*i/(n-1));
+}
+
+// ── Color scales ──────────────────────────────────────────────
+const plasma  = d3.scaleSequential(d3.interpolatePlasma).domain([0,1]);
+const viridis = d3.scaleSequential(d3.interpolateViridis).domain([0,1]);
+const modeColors = ['#2c7bb6','#e8a838','#d9534f','#8e6bbf'];
+
+// ── Chart factory ─────────────────────────────────────────────
+function makeCard(containerId, num, title, note, drawFn) {
+  const container = document.getElementById(containerId);
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-num">${num}</div>
+    <div class="card-title">${title}</div>
+    <svg class="chart" id="svg-${num}" height="190"></svg>
+    <div class="card-note">${note}</div>
+  `;
+  container.appendChild(card);
+  const svg = d3.select(`#svg-${num}`);
+  drawFn(svg);
+}
+
+// ── Shared margin ─────────────────────────────────────────────
+const M = {top:8, right:14, bottom:28, left:36};
+function innerW(svg) { return svg.node().getBoundingClientRect().width - M.left - M.right; }
+const H = 190 - M.top - M.bottom;
+
+function baseG(svg) {
+  return svg.append('g').attr('transform',`translate(${M.left},${M.top})`);
+}
+
+function axisX(g, scale, W, label) {
+  const ax = g.append('g').attr('class','axis')
+    .attr('transform',`translate(0,${H})`).call(d3.axisBottom(scale).ticks(4));
+  if (label) g.append('text').attr('x', W/2).attr('y', H+24)
+    .attr('text-anchor','middle').attr('fill','#aaa').attr('font-size',9).text(label);
+}
+function axisY(g, scale, label) {
+  g.append('g').attr('class','axis').call(d3.axisLeft(scale).ticks(4));
+  if (label) g.append('text').attr('transform','rotate(-90)').attr('x',-H/2).attr('y',-28)
+    .attr('text-anchor','middle').attr('fill','#aaa').attr('font-size',9).text(label);
+}
+
+// ════════════════════════════════════════════════════
+// ① Smoothing over time
+// ════════════════════════════════════════════════════
+makeCard('sanity-grid','①','Smoothing over time',
+  '<span>u → 0</span> as t → ∞ (Dirichlet BCs, no source). Higher modes decay faster: <span>e⁻ᵅⁿ²ᵗ</span>',
+  svg => {
+    const W = innerW(svg);
+    const g = baseG(svg);
+    const times = [0, 0.5, 1.5, 4.0, 10.0];
+    const xs = linspace(0, PI, 200);
+    const xS = d3.scaleLinear([0,PI],[0,W]);
+    const yS = d3.scaleLinear([-0.05,1.05],[H,0]);
+    axisX(g,xS,W,'x'); axisY(g,yS,'u(x,t)');
+    g.append('line').attr('x1',0).attr('x2',W).attr('y1',yS(0)).attr('y2',yS(0))
+     .attr('stroke','#eee').attr('stroke-width',1);
+    times.forEach((t,i) => {
+      const c = plasma(i/(times.length-1)*0.82+0.08);
+      g.append('path')
+        .datum(xs.map(x => [x, uxt(x,t,0.08)]))
+        .attr('fill','none').attr('stroke', c)
+        .attr('stroke-width', t===0 ? 2.4 : 1.6)
+        .attr('stroke-dasharray', t===0 ? 'none' : t>3 ? '4,3' : 'none')
+        .attr('d', d3.line().x(d=>xS(d[0])).y(d=>yS(d[1])));
+    });
+    // legend
+    times.forEach((t,i) => {
+      const c = plasma(i/(times.length-1)*0.82+0.08);
+      g.append('line').attr('x1',W-72).attr('x2',W-58).attr('y1',4+i*13).attr('y2',4+i*13)
+       .attr('stroke',c).attr('stroke-width',1.8);
+      g.append('text').attr('x',W-54).attr('y',7+i*13).attr('fill','#666').attr('font-size',8)
+       .text(`t=${t}`);
+    });
+  }
+);
+
+// ════════════════════════════════════════════════════
+// ② Mode decay rates
+// ════════════════════════════════════════════════════
+makeCard('sanity-grid','②','Mode decay rates',
+  'Mode <span>n=1</span> persists longest — dominant shape at large t. Mode <span>n=7</span> vanishes almost instantly.',
+  svg => {
+    const W = innerW(svg);
+    const g = baseG(svg);
+    const ts = linspace(0,12,300);
+    const alpha = 0.08;
+    const xS = d3.scaleLinear([0,12],[0,W]);
+    const yS = d3.scaleLinear([-0.02, 1.05],[H,0]);
+    axisX(g,xS,W,'t'); axisY(g,yS,'aₙ·e⁻ᵅⁿ²ᵗ');
+    modes.forEach(([n,a],i) => {
+      g.append('path')
+        .datum(ts.map(t => [t, a*Math.exp(-alpha*n*n*t)]))
+        .attr('fill','none').attr('stroke', modeColors[i]).attr('stroke-width',2)
+        .attr('d', d3.line().x(d=>xS(d[0])).y(d=>yS(d[1])));
+      g.append('text').attr('x',xS(0.2)).attr('y',yS(a)-4)
+       .attr('fill',modeColors[i]).attr('font-size',8).text(`n=${n}`);
+    });
+  }
+);
+
+// ════════════════════════════════════════════════════
+// ③ Energy dissipation
+// ════════════════════════════════════════════════════
+makeCard('sanity-grid','③','Energy dissipation',
+  '<span>‖u‖²</span> strictly decreasing — consistent with the 2nd law. No source term → entropy always increases.',
+  svg => {
+    const W = innerW(svg);
+    const g = baseG(svg);
+    const alpha = 0.08;
+    const ts = linspace(0,12,300);
+    const E = t => modes.reduce((s,[n,a]) => s + a*a*Math.exp(-2*alpha*n*n*t), 0) * PI/2;
+    const eVals = ts.map(t => E(t));
+    const xS = d3.scaleLinear([0,12],[0,W]);
+    const yS = d3.scaleLinear([0, d3.max(eVals)*1.05],[H,0]);
+    axisX(g,xS,W,'t'); axisY(g,yS,'‖u(·,t)‖²');
+    // area
+    g.append('path')
+      .datum(ts.map((t,i) => [t,eVals[i]]))
+      .attr('fill','#3aabaa').attr('fill-opacity',0.12)
+      .attr('d', d3.area().x(d=>xS(d[0])).y0(H).y1(d=>yS(d[1])));
+    g.append('path')
+      .datum(ts.map((t,i) => [t,eVals[i]]))
+      .attr('fill','none').attr('stroke','#3aabaa').attr('stroke-width',2.2)
+      .attr('d', d3.line().x(d=>xS(d[0])).y(d=>yS(d[1])));
+  }
+);
+
+// ════════════════════════════════════════════════════
+// ④ Sensitivity to α
+// ════════════════════════════════════════════════════
+makeCard('ident-grid','④','Sensitivity to α  (t = 1.5)',
+  'Different <span>α</span> → clearly distinct spatial profiles. α is identifiable from a single snapshot in time.',
+  svg => {
+    const W = innerW(svg);
+    const g = baseG(svg);
+    const alphas = [0.02,0.08,0.20,0.50];
+    const xs = linspace(0,PI,200);
+    const xS = d3.scaleLinear([0,PI],[0,W]);
+    const yS = d3.scaleLinear([-0.02,1.1],[H,0]);
+    axisX(g,xS,W,'x'); axisY(g,yS,'u(x, 1.5)');
+    alphas.forEach((a,i) => {
+      const c = viridis(i/(alphas.length-1));
+      g.append('path')
+        .datum(xs.map(x => [x, uxt(x,1.5,a)]))
+        .attr('fill','none').attr('stroke',c).attr('stroke-width',2)
+        .attr('d', d3.line().x(d=>xS(d[0])).y(d=>yS(d[1])));
+    });
+    alphas.forEach((a,i) => {
+      const c = viridis(i/(alphas.length-1));
+      g.append('line').attr('x1',W-70).attr('x2',W-56).attr('y1',4+i*13).attr('y2',4+i*13)
+       .attr('stroke',c).attr('stroke-width',2);
+      g.append('text').attr('x',W-52).attr('y',8+i*13).attr('fill','#666').attr('font-size',8)
+       .text(`α=${a}`);
+    });
+  }
+);
+
+// ════════════════════════════════════════════════════
+// ⑤ Log-linear decay → infer α
+// ════════════════════════════════════════════════════
+makeCard('ident-grid','⑤','Log-linear decay → infer α',
+  'At large t: <span>log u ≈ log a₁ − α·t</span>. Slope of log-plot directly gives α — no numerical solver needed.',
+  svg => {
+    const W = innerW(svg);
+    const g = baseG(svg);
+    const alphas = [0.02,0.08,0.20,0.50];
+    const xProbe = PI/2;
+    const ts = linspace(0.3,12,300);
+    const allVals = alphas.flatMap(a => ts.map(t => Math.log(Math.abs(uxt(xProbe,t,a)))).filter(v=>isFinite(v)&&v>-6));
+    const xS = d3.scaleLinear([0,12],[0,W]);
+    const yS = d3.scaleLinear([-5.5, 0.2],[H,0]);
+    axisX(g,xS,W,'t'); axisY(g,yS,'log |u(π/2, t)|');
+    // guide line y=0
+    g.append('line').attr('x1',0).attr('x2',W).attr('y1',yS(0)).attr('y2',yS(0))
+     .attr('stroke','#eee').attr('stroke-width',1);
+    alphas.forEach((a,i) => {
+      const c = viridis(i/(alphas.length-1));
+      const pts = ts.map(t => {
+        const v = Math.log(Math.abs(uxt(xProbe,t,a)));
+        return isFinite(v) && v > -6 ? [t,v] : null;
+      }).filter(Boolean);
+      g.append('path').datum(pts)
+        .attr('fill','none').attr('stroke',c).attr('stroke-width',1.8)
+        .attr('d', d3.line().x(d=>xS(d[0])).y(d=>yS(d[1])));
+    });
+    // slope annotation for α=0.08
+    const a = 0.08;
+    const t0=2, t1=7;
+    const y0=Math.log(Math.abs(uxt(xProbe,t0,a)));
+    const y1=Math.log(Math.abs(uxt(xProbe,t1,a)));
+    g.append('line').attr('x1',xS(t0)).attr('x2',xS(t1)).attr('y1',yS(y0)).attr('y2',yS(y1))
+     .attr('stroke','#c0392b').attr('stroke-width',1.5).attr('stroke-dasharray','3,2');
+    const slope = (y1-y0)/(t1-t0);
+    g.append('text').attr('x',xS((t0+t1)/2)+6).attr('y',yS((y0+y1)/2)-4)
+     .attr('fill','#c0392b').attr('font-size',8).text(`slope ≈ ${slope.toFixed(3)} = −α`);
+  }
+);
+
+// ════════════════════════════════════════════════════
+// ⑥ Loss landscape
+// ════════════════════════════════════════════════════
+makeCard('ident-grid','⑥','Loss landscape  L(α)',
+  'Sharp, unique minimum → α is <span>well-identifiable</span>. Earlier observations yield a wider (flatter) bowl.',
+  svg => {
+    const W = innerW(svg);
+    const g = baseG(svg);
+    const alphaTrue = 0.08;
+    const tObs = [0.5, 1.5, 4.0];
+    const xObs = linspace(0.3, PI-0.3, 10);
+    const alphaGrid = linspace(0.005, 0.45, 300);
+    const obsColors = ['#2c7bb6','#e8a838','#d9534f'];
+    const xS = d3.scaleLinear([0,0.45],[0,W]);
+
+    const losses = tObs.map(t => {
+      const uTrue = xObs.map(x => uxt(x,t,alphaTrue));
+      const raw = alphaGrid.map(a => {
+        const pred = xObs.map(x => uxt(x,t,a));
+        return d3.mean(pred.map((p,i) => (p-uTrue[i])**2));
+      });
+      const mx = d3.max(raw);
+      return raw.map(v => v/mx);
+    });
+
+    const yS = d3.scaleLinear([0,1.05],[H,0]);
+    axisX(g,xS,W,'α'); axisY(g,yS,'Normalised L(α)');
+    // true alpha vline
+    g.append('line').attr('x1',xS(alphaTrue)).attr('x2',xS(alphaTrue))
+     .attr('y1',0).attr('y2',H).attr('stroke','#222').attr('stroke-width',1.2)
+     .attr('stroke-dasharray','4,2');
+    g.append('text').attr('x',xS(alphaTrue)+3).attr('y',12)
+     .attr('fill','#444').attr('font-size',8).text('α_true');
+
+    tObs.forEach((t,i) => {
+      g.append('path')
+        .datum(alphaGrid.map((a,j) => [a, losses[i][j]]))
+        .attr('fill','none').attr('stroke',obsColors[i]).attr('stroke-width',2)
+        .attr('stroke-dasharray', i===0 ? '5,3' : i===1 ? 'none' : '2,2')
+        .attr('d', d3.line().x(d=>xS(d[0])).y(d=>yS(d[1])));
+    });
+    // legend
+    tObs.forEach((t,i) => {
+      g.append('line').attr('x1',W-68).attr('x2',W-54).attr('y1',5+i*13).attr('y2',5+i*13)
+       .attr('stroke',obsColors[i]).attr('stroke-width',2)
+       .attr('stroke-dasharray', i===0 ? '5,3' : i===1 ? 'none' : '2,2');
+      g.append('text').attr('x',W-50).attr('y',9+i*13).attr('fill','#666').attr('font-size',8)
+       .text(`t=${t}`);
+    });
+  }
+);
+</script>
+</body>
+</html>

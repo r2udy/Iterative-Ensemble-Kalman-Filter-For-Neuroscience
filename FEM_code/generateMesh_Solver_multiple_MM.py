@@ -16,7 +16,7 @@ import pyvista
 
 class HoleGeometry:
     """Represents a circular hole in the domain"""
-    def __init__(self, center, radius_ves, radius_0, Pves, cmro2, marker=3):
+    def __init__(self, center, radius_ves, Pves, radius_0=None, cmro2=None, marker=3):
         self.center = center
         self.radius_ves = radius_ves
         self.radius_0 = radius_0
@@ -38,7 +38,7 @@ class DiffusionSolver:
         self.alpha = 1.39e-15
         self.cmro2_by_M = (60 * self.D * self.alpha * 1e12)
     
-    def generate_mesh(self, holes, domain_size=600.0, element_size=12.0, refined_size=2.0):
+    def generate_mesh(self, holes, domain_size=400.0, element_size=12.0, refined_size=2.0):
         """
         Generate a 2D mesh with circular holes.
         Outer domain boundary is NOT tagged; only holes are tagged.
@@ -166,52 +166,42 @@ class DiffusionSolver:
         # Initialize M function
         self.Mmax_func = fem.Function(self.V)
 
-        self.Mmax_func.x.array[:] = -params.cmro2_background / self.cmro2_by_M
-        
         domain = self.domain
         tdim = domain.topology.dim
         fdim = tdim - 1
         domain.topology.create_connectivity(fdim, tdim)
         domain.topology.create_connectivity(fdim, 0)  # Needed to get vertices of each facet
         x = domain.geometry.x  # Nodal coordinates
-        
-        for hole in holes:
-            
-            inner_facets = []
-            inner_values = []
-            num_facets = domain.topology.index_map(fdim).size_local # Get all local facets
-            
-            center=hole.center
-            Rves = hole.radius_ves
-            R0 = hole.radius_0
-            marker = 200 + hole.marker
 
-            for f in range(num_facets):
-                    vertex_ids = domain.topology.connectivity(fdim, 0).links(f)
-                    coords = x[vertex_ids]
-                    midpoint = np.mean(coords, axis=0)
+        primary_hole = holes[0]
 
-                    # Compute distance from center in XY plane
-                    dx = midpoint[0] - center[0]
-                    dy = midpoint[1] - center[1]
-                    dist = np.sqrt(dx**2 + dy**2)
+        center = primary_hole.center
+        Rves = primary_hole.radius_ves
+        R0 = primary_hole.radius_0
 
-                    if R0 > dist > Rves:
-                        inner_facets.append(f)
-                        inner_values.append(marker)
+        inner_facets = []
+        num_facets = self.domain.topology.index_map(fdim).size_local # Get all local facets
 
-            all_indices = np.array(inner_facets, dtype=np.int32)
-            all_values = np.array(inner_values, dtype=np.int32)
+        for f in range(num_facets):
+            vertex_ids = domain.topology.connectivity(fdim, 0).links(f)
+            coords = x[vertex_ids]
+            midpoint = np.mean(coords, axis=0)
 
-            # Set M values for each hole
-            for i, hole in enumerate(holes):
-                hole_facets = all_indices[np.array(all_values) == (200 + hole.marker)]
-                hole_dofs = fem.locate_dofs_topological(
-                    self.V, self.domain.topology.dim-1, 
-                    hole_facets
-                )
-                self.Mmax_func.x.array[hole_dofs] = -hole.cmro2 / self.cmro2_by_M
-        
+            # Compute distance from center in XY plane
+            dx = midpoint[0] - center[0]
+            dy = midpoint[1] - center[1]
+            dist = np.sqrt(dx**2 + dy**2)
+
+            if R0 > dist > Rves:
+                inner_facets.append(f)
+
+        inner_facets = np.array(inner_facets, dtype=np.int32)
+        hole_dofs = fem.locate_dofs_topological(
+            self.V, fdim, 
+            inner_facets
+        )
+        self.Mmax_func.x.array[hole_dofs] = -primary_hole.cmro2 / self.cmro2_by_M
+
         # Boundary conditions
         self.setup_dirichlet_bcs(holes)
         
@@ -286,24 +276,26 @@ class DiffusionSolver:
         all_neumann_facets = []
         all_neumann_values = []
 
-        for hole in holes:
-            center = np.array(hole.center[:2])
-            R0 = hole.radius_0
-            marker = 100 + hole.marker
+        primary_hole = holes[0]
 
-            for f in range(num_facets):
-                vertex_ids = domain.topology.connectivity(fdim, 0).links(f) # example array([17, 88])
-                coords = x[vertex_ids] # dim 2-by-2 array of vertex coordinates
-                midpoint = np.mean(coords, axis=0)
+        center = primary_hole.center
+        Rves = primary_hole.radius_ves
+        R0 = primary_hole.radius_0
+        marker = 100 + primary_hole.marker
+        
+        for f in range(num_facets):
+            vertex_ids = domain.topology.connectivity(fdim, 0).links(f) # example array([17, 88])
+            coords = x[vertex_ids] # dim 2-by-2 array of vertex coordinates
+            midpoint = np.mean(coords, axis=0)
 
-                # Compute distance from center in XY plane
-                dx = midpoint[0] - center[0]
-                dy = midpoint[1] - center[1]
-                dist = np.sqrt(dx**2 + dy**2)
+            # Compute distance from center in XY plane
+            dx = midpoint[0] - center[0]
+            dy = midpoint[1] - center[1]
+            dist = np.sqrt(dx**2 + dy**2)
 
-                if np.abs(dist - R0) < tolerance:
-                    all_neumann_facets.append(f)
-                    all_neumann_values.append(marker)
+            if np.abs(dist - R0) < tolerance:
+                all_neumann_facets.append(f)
+                all_neumann_values.append(marker)
 
         # Merge with existing facet_tags (if any)
         if self.facet_tags is not None:
@@ -397,6 +389,60 @@ class SolverParameters:
         self.cmro2_background = cmro2_background
 
 def main():
+
+    def generate_random_hole_centers(
+        n_holes, domain_size, exclusion_radius, exclusion_center=(0.0, 0.0), min_distance=0.0, seed=None):
+        """
+        Uniformly sample points in a square domain exlusding a disk.
+        
+        Parameters:
+        - n_holes: int
+            Number of hole centers to generate
+        - domain_size: float
+            Size of the square domain (length of one side)
+        - exclusion_center: tuple(float, float)
+            (x, y) coordinates of the center of the exclusion disk
+        - exclusion_radius: float
+            Radius of the exclusion disk
+        - seed: int or None
+            Random seed for reproducibility
+
+        Returns:
+        - centers: list of tuples
+            List of (x, y, 0) coordinates of the hole centers
+        """
+        if seed is not None:
+            np.random.seed(seed)
+        centers = []
+        L = domain_size / 2
+        for i in range(n_holes):
+            while len(centers) < n_holes:
+                x = np.random.uniform(-L, L)
+                y = np.random.uniform(-L, L)
+
+                # Exclude points inside the exclusion disk
+                dx = x - exclusion_center[0]
+                dy = y - exclusion_center[1]
+                dist = np.sqrt(dx**2 + dy**2)
+                if dist <= exclusion_radius:
+                    continue
+
+                # Optional minimum distance between holes
+                if min_distance > 0:
+                    too_close = False
+                    for center in centers:
+                        dx = x - center[0]
+                        dy = y - center[1]
+                        dist = np.sqrt(dx**2 + dy**2)
+                        if dist < min_distance:
+                            too_close = True
+                            break
+                    if too_close:
+                        continue
+                centers.append((x, y, 0.0))
+
+        return centers
+
     # Initialize MPI
     comm = MPI.COMM_WORLD
     
@@ -410,14 +456,43 @@ def main():
     solver = DiffusionSolver(comm)
     
     # Hole 1:
-    cmro2_1     = 2.0
-    Pves_1      = 80.
-    Rves_1      = 10.
+    center_1 = (0., 0., 0.)
+    cmro2_1     = 2.4
+    Pves_1      = 60.
+    Rves_1      = 20.
     R0_1        = 100.
 
-    # Define holes
-    holes = [HoleGeometry(center=(0., 0., 0.), cmro2=cmro2_1, Pves=Pves_1, radius_ves=Rves_1, radius_0=R0_1, marker=params.marker),]
+    n_secondary_holes = 17
+    domain_size = 400.0
+    Rves_cap = 4.8
+    exclusion_radius = R0_1
+    secondary_pves = Pves_1 * 0.5
+    seed = 2
+
+    capillaries = generate_random_hole_centers(
+        n_secondary_holes, domain_size, exclusion_radius, min_distance=Rves_cap, seed=seed)
+
+    holes_capillaries = [
+        HoleGeometry(center=center, Pves=secondary_pves, radius_ves=Rves_cap, marker=params.marker + i)
+        for i, center in enumerate(capillaries)
+    ]
+
     
+    # Define holes
+    holes = [
+        HoleGeometry(center=center_1, cmro2=cmro2_1, Pves=Pves_1, radius_ves=Rves_1, radius_0=R0_1, marker=params.marker),
+    ]
+
+    for i, center in enumerate(capillaries):
+        holes.append(
+            HoleGeometry(
+                center=center,
+                Pves=secondary_pves,
+                radius_ves=Rves_cap,
+                marker=params.marker + 1 + i
+            )
+        )
+
     # Generate mesh
     if comm.rank == 0:
         print("Generating mesh...")
@@ -427,7 +502,7 @@ def main():
     if comm.rank == 0:
         print("Setting up problem...")
     solver.setup_problem(params, holes)
-    # solver.plot_boundaries(holes)
+    solver.plot_boundaries(holes)
     
     if comm.rank == 0:
         print("Solving nonlinear problem...")
