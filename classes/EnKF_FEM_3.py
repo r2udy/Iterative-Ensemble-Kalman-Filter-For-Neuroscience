@@ -28,7 +28,8 @@ class EnKF:
                  n_ensembles:int,
                  dynamics_model: Callable,
                  rng: Optional[np.random.Generator] = None,
-                 seed: Optional[int] = 0):
+                 seed: Optional[int] = 0,
+                 b_decay: float = 0.0):
         
         # Constants conversion
         self.SEC_MIN = 60
@@ -50,6 +51,13 @@ class EnKF:
             self.rng = np.random.default_rng(seed)
         else:
             self.rng = rng
+
+        # B annealing schedule
+        # b_decay = 0.0 : B = 0 always (correct for static IEnKF, no dynamics)
+        # b_decay in (0,1) : geometric decay B_n = B * b_decay^n (practical fallback)
+        # b_decay = 1.0 : constant B (legacy behaviour)
+        self.b_decay = b_decay
+        self._iter   = 0       # predict-step counter
         
         # Initialize ensemble
         self.ensemble = np.zeros((state_dim, n_ensembles))
@@ -60,6 +68,7 @@ class EnKF:
 
         self.length_scale = 1.0 # Length scale for the update step
         self.grid_size = 20 # observation dimension
+        self.Rves = 17.5  # vessel radius [um] — override via set_rves() before update
         
         
     def initialize_ensemble(self, a: np.ndarray, b: np.ndarray):
@@ -76,8 +85,8 @@ class EnKF:
         # ratio M
         for k in range(self.state_dim):
             self.ensemble[k, :] = self.rng.normal(
-                a[k], b[k], size=(1, self.n_ensembles)
-                )  # Shape: (state_dim, n_ensembles)
+                a[k], np.sqrt(b[k]), size=(1, self.n_ensembles)
+                )  # Shape: (state_dim, n_ensembles); b[k] is variance, scale expects std
         
         self.R0_prior = a[1]
         self.sigma_R0 = b[1]
@@ -89,6 +98,14 @@ class EnKF:
     def set_observation_noise(self, R: np.ndarray):
         """Set the observation noise covariance matrix"""
         self.R = R
+
+    def set_rves(self, Rves: float):
+        """
+        Set the vessel radius used in observation_operator.
+        Call this once after _make_enkf and before the first update().
+        Default is 17.5 um. Must match the Rves used to generate the true pO2 map.
+        """
+        self.Rves = Rves
 
     def observation_operator(self, state: np.ndarray, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
         """
@@ -111,7 +128,7 @@ class EnKF:
         # Extract parameters from state
         cmro2   = state[0] * self.cmro2_by_M
         Pves    = state[2]
-        Rves    = 17.5#np.diff(X[0])[0]
+        Rves    = self.Rves   # set via set_rves(); default 17.5 um (was hardcoded to grid spacing — Bug 1)
         R0      = state[1]
         center  = (0.0, 0.0)
         marker = 3
@@ -167,39 +184,57 @@ class EnKF:
         
     def predict(self):
         """
-        Predictions step: propagate each ensemble member through the dynamics model
-        and add background noise. Here there is no dynamics model.
+        Predict step: propagate ensemble through dynamics model and optionally
+        add background noise.
+
+        For static parameter estimation (identity dynamics) the theoretically
+        correct choice is b_decay=0.0, which skips noise injection entirely.
+        Pass b_decay in (0,1) for geometric annealing as a practical fallback
+        if ensemble collapse is observed.
         """
+        # Effective B this iteration: B_n = B * b_decay^n
+        # If b_decay == 0 (default) the noise is always zero; skip the
+        # multivariate_normal call entirely to avoid singular-matrix errors.
+        b_scale = self.b_decay ** self._iter   # 0.0^0 = 1, but b_decay=0 → scale=0
+        add_noise = (self.b_decay > 0.0)
 
         for i in range(self.n_ensembles):
-            # Propagate state through dynamics model
             self.ensemble[:, i] = self.dynamics_model(self.ensemble[:, i])
-            
-            # Add background noise using truncated normal distribution
-            self.ensemble[:, i] += self.rng.multivariate_normal(np.zeros(self.state_dim), self.B)
+            if add_noise and b_scale > 1e-12:
+                self.ensemble[:, i] += self.rng.multivariate_normal(
+                    np.zeros(self.state_dim), b_scale * self.B)
 
-    def update(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray):
+        self._iter += 1   # advance iteration counter
+
+    def update(self, observation: np.ndarray, X: np.ndarray, Y: np.ndarray,
+               use_augmentation: bool = True):
         """
-        Update step: adjust the ensemble based on observations
-        
+        Update step: adjust the ensemble based on observations.
+
         Parameters:
         -----------
         observation: np.ndarray, shape (obs_dim,)
             The observed measurement
+        use_augmentation : bool
+            If True (default), augment the observation vector with a soft R0
+            prior constraint (the IEnKF formulation).
+            If False, run a standard EnKF update with only the pO2 observations
+            — useful as a no-augmentation baseline to verify that the soft R0
+            constraint is actually helping.
         """
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         size = comm.Get_size()
-    
+
         # Generate pertubated observations according to a Gaussian distributions
         obs_ensemble = np.zeros((self.obs_dim, self.n_ensembles))
         obs_model_ensembles = np.zeros_like(obs_ensemble)
-        
+
         # Generate perturbed observations
         assert self.R.shape == (self.obs_dim, self.obs_dim)
         obs_perturbation = self.rng.multivariate_normal(np.zeros(self.obs_dim), self.R, size=self.n_ensembles).T
         obs_ensemble = observation[:, np.newaxis] + obs_perturbation
-        
+
         # Split ensembles across ranks
         local_indices = np.array_split(np.arange(self.n_ensembles), size)[rank]
         local_results = []
@@ -220,49 +255,39 @@ class EnKF:
         state_deviation     = self.ensemble - state_mean[:, np.newaxis]
         obs_deviation       = obs_model_ensembles - obs_mean[:, np.newaxis]
 
-        # Augmented observed ensemble
-        R0_obs_pert = self.rng.normal(
-            loc=self.R0_prior,
-            scale=self.sigma_R0,
-            size=self.n_ensembles
-        )
-        obs_ensemble_aug = np.vstack([
-            obs_ensemble, 
-            R0_obs_pert[np.newaxis, :]
-        ])
+        # 2. Build effective (possibly augmented) observation system
+        if use_augmentation:
+            R0_obs_pert = self.rng.normal(
+                loc=self.R0_prior, scale=self.sigma_R0, size=self.n_ensembles
+            )
+            obs_eff       = np.vstack([obs_ensemble,       R0_obs_pert[np.newaxis, :]])
+            obs_model_eff = np.vstack([obs_model_ensembles, self.ensemble[1, :][np.newaxis, :]])
+            Q = np.block([
+                [self.R,                       np.zeros((self.obs_dim, 1))],
+                [np.zeros((1, self.obs_dim)),  np.array([[self.sigma_R0**2]])],
+            ])
+        else:
+            obs_eff       = obs_ensemble
+            obs_model_eff = obs_model_ensembles
+            Q = self.R
 
-        R0_model = self.ensemble[1, :]
+        obs_mean_eff     = np.mean(obs_model_eff, axis=1)
+        obs_deviation_eff = obs_model_eff - obs_mean_eff[:, np.newaxis]
 
-        obs_model_ensembles_aug = np.vstack([
-            obs_model_ensembles,
-            R0_model[np.newaxis, :]
-        ])
-
-        obs_mean_aug = np.mean(obs_model_ensembles_aug, axis=1)
-        obs_deviation_aug = obs_model_ensembles_aug - obs_mean_aug[:, np.newaxis]
-
-        Q = np.block([
-            [self.R,                        np.zeros((self.obs_dim, 1))],
-            [np.zeros((1, self.obs_dim)),   np.array([[self.sigma_R0**2]])]
-        ])
-        # 2. Compute Kalman Gain
-        # A_B = (state_deviation @ state_deviation.T) / (self.n_ensembles - 1)
-        self.A_BHT = (state_deviation @ obs_deviation_aug.T) / (self.n_ensembles - 1)
-        self.A_HBHT = (obs_deviation_aug @ obs_deviation_aug.T) / (self.n_ensembles - 1)
+        # 3. Compute Kalman Gain
+        self.A_BHT  = (state_deviation @ obs_deviation_eff.T) / (self.n_ensembles - 1)
+        self.A_HBHT = (obs_deviation_eff @ obs_deviation_eff.T) / (self.n_ensembles - 1)
         self.K = self.A_BHT @ np.linalg.inv(self.A_HBHT + Q)
-        
-            # 3. Update ensemble: innovation = (perturbed) observation - model prediction (both augmented)
-        self.innovation_aug = obs_ensemble_aug - obs_model_ensembles_aug
-        # keep legacy attribute name for external code compatibility
-        self.innovation = self.innovation_aug
-        self.ensemble += self.length_scale * self.K @ self.innovation_aug
 
-        
+        # 4. Update ensemble
+        self.innovation_aug = obs_eff - obs_model_eff
+        self.innovation = self.innovation_aug       # legacy name kept for external compatibility
+        self.ensemble += self.length_scale * self.K @ self.innovation_aug
 
         # Compute NIS on the original (unaugmented) observation space
         A_HBHT_unaug = (obs_deviation @ obs_deviation.T) / (self.n_ensembles - 1)
         NIS = (observation - obs_mean).T @ np.linalg.inv(A_HBHT_unaug + self.R) @ (observation - obs_mean)
-        self.NIS = NIS    
+        self.NIS = NIS
             
     def get_state_estimate(self):
         """
@@ -311,4 +336,3 @@ class EnKF:
             The innovation for each ensemble member
         """
         return self.innovation
-        

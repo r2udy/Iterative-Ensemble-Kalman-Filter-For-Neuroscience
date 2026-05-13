@@ -459,7 +459,7 @@ def main():
     Rves_1      = 20.
     R0_1        = 100.
 
-    n_secondary_holes = 17
+    n_secondary_holes = 7
     domain_size = 400.0
     Rves_cap = 4.8
     exclusion_radius = R0_1
@@ -499,7 +499,7 @@ def main():
     if comm.rank == 0:
         print("Setting up problem...")
     solver.setup_problem(params, holes)
-    # solver.plot_boundaries(holes)
+    solver.plot_boundaries(holes)
     
     if comm.rank == 0:
         print("Solving nonlinear problem...")

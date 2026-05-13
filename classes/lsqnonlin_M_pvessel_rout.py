@@ -31,8 +31,9 @@ from MapGenerator import MapGenerator
 from synthetic_data_generation import load_synthetic_data
 
 class Po2Fitter_3:
-    def __init__(self, pO2_array: np.ndarray, Rves, X_axis: np.ndarray, Y_axis: np.ndarray):
-        
+    def __init__(self, pO2_array: np.ndarray, Rves, X_axis: np.ndarray, Y_axis: np.ndarray,
+                 center=None):
+
         # Constants conversion
         self.SEC_MIN = 60
         self.CM3_M3 = 1e6
@@ -40,49 +41,52 @@ class Po2Fitter_3:
         self.D = 4.0e3
         self.alpha = 1.39e-15
         self.cmro2_by_M = self.SEC_MIN * self.UM3_M3 / self.CM3_M3 * self.D * self.alpha
-        
+
         # Partial Oxygen Array
         self.raw_data = pO2_array
         self.X_axis = X_axis
         self.Y_axis = Y_axis
+        self._center = center   # (cx, cy) if known (e.g. synthetic data); None → infer from argmax
         self.distance_map = self._compute_distance_map()
-        
+
         # Parameters
         self.pvessel = np.max(self.raw_data)
         self.rin = Rves
 
     def _compute_distance_map(self):
         self.idx_min = np.argmin(self.raw_data.flatten())
-        imax, jmax = np.unravel_index(np.argmax(self.raw_data), self.raw_data.shape)
-        cx, cy = self.X_axis[jmax, imax], self.Y_axis[jmax, imax]
+        if self._center is not None:
+            cx, cy = self._center
+        else:
+            imax, jmax = np.unravel_index(np.argmax(self.raw_data), self.raw_data.shape)
+            cx, cy = self.X_axis[jmax, imax], self.Y_axis[jmax, imax]
         R = np.sqrt((self.X_axis - cx) ** 2 + (self.Y_axis - cy) ** 2)
         return R
-    
+
     def _partial_pressure(self, r, M, pvessel, rin, rout):
-            out = pvessel + (M / 4) * (rout**2 - rin**2) - (M * rout**2 / 2) * np.log(rout / rin)
-            return out
+        return pvessel + (M / 4) * (r**2 - rin**2) - (M * rout**2 / 2) * np.log(r / rin)
     
 
-    def fit(self):
+    def fit(self, cmro2_init=None, r0_init=None, pvessel_init=None, r0_max=None):
         self.mask = (self.distance_map > self.rin)
         r_axis = self.distance_map[self.mask].flatten()
         target = self.raw_data[self.mask].flatten()
         sorted_indices = np.argsort(r_axis)
         r_axis = r_axis[sorted_indices]
         target = target[sorted_indices]
-        
+
         def residual(params):
             M, pvessel, r0 = params
-            
             obs_estimation = np.array([self._partial_pressure(r, M, pvessel, self.rin, r0) for r in r_axis])
-            return obs_estimation[sorted_indices] - target
-        
-        cmro2_inital = 2.
-        M_initial = cmro2_inital / self.cmro2_by_M
-        r0_initial = 80.
-        pvessel_initial = self.pvessel
-        initial_params = [M_initial, pvessel_initial, r0_initial] # M, rin, rout
-        bounds = ([1e-4, 30, self.rin], [1e-1, 120, r_axis.max()])
+            return obs_estimation - target
+
+        cmro2_inital    = cmro2_init   if cmro2_init   is not None else 2.0
+        r0_initial      = r0_init      if r0_init      is not None else 120.0
+        pvessel_initial = pvessel_init if pvessel_init is not None else self.pvessel
+        M_initial       = cmro2_inital / self.cmro2_by_M
+        initial_params  = [M_initial, pvessel_initial, r0_initial]
+        r0_upper        = r0_max if r0_max is not None else r_axis.max()
+        bounds = ([1e-4, 30, self.rin], [1e-1, 120, r0_upper])
         print("\nLeast squares nonlinear fitting - 3 paramters (CMRO2, P_{vessel wall} and R0)\n")
         result = least_squares(residual, x0=initial_params, bounds=bounds, verbose=1, max_nfev=10000)
         
@@ -216,7 +220,52 @@ class Po2Fitter_3:
         return self.cmro2_est, self.M_est, self.pvessel_est, self.r0_est
         
 if __name__ == "__main__":
-    
+
+    # --------- Synthetic validation ---------
+    print("=" * 65)
+    print(" SYNTHETIC VALIDATION (known ground truth)")
+    print("=" * 65)
+
+    CMRO2_TRUE  = 2.0    # umol/um3/min
+    PVES_TRUE   = 60.0   # mmHg
+    R0_TRUE     = 80.0   # um
+    RVES_TRUE   = 17.0   # um
+    NOISE_STD   = 2.0    # mmHg
+    GRID_SIZE   = 20
+
+    D_val     = 4.0e3
+    alpha_val = 1.39e-15
+    cmro2_by_M_val = 60 * 1e12 * D_val * alpha_val
+    M_TRUE = CMRO2_TRUE / cmro2_by_M_val
+
+    domain = 110.0
+    x_lin = np.linspace(-domain, domain, GRID_SIZE)
+    y_lin = np.linspace(-domain, domain, GRID_SIZE)
+    X_syn, Y_syn = np.meshgrid(x_lin, y_lin)
+
+    R_syn = np.sqrt(X_syn**2 + Y_syn**2)
+
+    def analytical_pO2(r, M, pvessel, rin, rout):
+        return pvessel + (M / 4) * (r**2 - rin**2) - (M * rout**2 / 2) * np.log(r / rin)
+
+    pO2_syn = np.where(
+        R_syn >= RVES_TRUE,
+        analytical_pO2(R_syn, M_TRUE, PVES_TRUE, RVES_TRUE, R0_TRUE),
+        PVES_TRUE
+    )
+    np.random.seed(42)
+    pO2_syn_noisy = pO2_syn + np.random.normal(0, NOISE_STD, pO2_syn.shape)
+
+    syn_fitter = Po2Fitter_3(pO2_array=pO2_syn_noisy, Rves=RVES_TRUE, X_axis=X_syn, Y_axis=Y_syn)
+    syn_fitter.fit()
+
+    cmro2_est, _, pves_est, r0_est = syn_fitter.get_results()
+    print("\n Ground truth vs. LSQ estimates:")
+    print(f"  CMRO2  : true={CMRO2_TRUE:.4f}  est={cmro2_est:.4f}  err={abs(cmro2_est-CMRO2_TRUE)/CMRO2_TRUE*100:.1f}%")
+    print(f"  Pvessel: true={PVES_TRUE:.4f}  est={pves_est:.4f}  err={abs(pves_est-PVES_TRUE)/PVES_TRUE*100:.1f}%")
+    print(f"  R0     : true={R0_TRUE:.4f}  est={r0_est:.4f}  err={abs(r0_est-R0_TRUE)/R0_TRUE*100:.1f}%")
+    print("=" * 65)
+
     # --------- Load data ---------
     df = pd.read_pickle("/Users/ruudybayonne/Desktop/Stanford_Biology/PROJECT_OxyDiff/Python_code/Data/dataset.pkl")
     df_copy = df.copy()
